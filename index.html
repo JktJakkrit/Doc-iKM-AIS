@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Extract linked rows from browser-saved iKM PDFs and export them to Excel."
+    />
+    <title>iKM PDF to Excel</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header class="app-header">
+        <div class="brand-mark" aria-hidden="true">iK</div>
+        <div>
+          <p class="eyebrow">Document to workbook</p>
+          <h1>Build a workbook from a page.</h1>
+          <p class="intro">Drop in browser-saved iKM PDFs. Every clickable link becomes a row in your Excel file.</p>
+        </div>
+      </header>
+
+      <section class="workspace" aria-label="PDF to Excel converter">
+        <div class="work-column">
+          <div
+            class="drop-zone"
+            id="dropZone"
+            tabindex="0"
+            role="button"
+            aria-label="Choose or drop PDF files"
+            aria-describedby="dropHelp"
+          >
+            <input id="sourceInput" type="file" accept=".pdf,application/pdf" multiple />
+            <span class="upload-icon" aria-hidden="true">↑</span>
+            <strong>Drop PDF files here</strong>
+            <span id="dropHelp">or browse to select one or more PDFs</span>
+            <small>Browser-saved PDFs preserve their clickable URLs</small>
+          </div>
+
+          <div class="file-list" id="fileList" aria-live="polite">
+            <p class="empty-files">No files selected</p>
+          </div>
+
+          <div class="button-row">
+            <button class="primary-button" id="generateButton" type="button" disabled>
+              Export Excel
+            </button>
+            <button class="text-button" id="resetButton" type="button">Clear</button>
+          </div>
+
+          <p class="notice" id="notice" role="status">
+            Only rows with a real clickable URL are included. PDF text or a visible “Click” label alone is not a URL.
+          </p>
+        </div>
+
+        <aside class="preview" aria-label="Excel output preview">
+          <div class="preview-heading">
+            <div>
+              <p class="eyebrow">Output preview</p>
+              <h2>Excel columns</h2>
+            </div>
+            <span class="status" id="statusBadge">Waiting for PDF</span>
+          </div>
+
+          <div class="summary" aria-live="polite">
+            <span><strong id="pageCount">0</strong> pages</span>
+            <span><strong id="rowCount">0</strong> link rows</span>
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Header</th>
+                  <th>sub header</th>
+                  <th>Detail</th>
+                  <th>Link</th>
+                </tr>
+              </thead>
+              <tbody id="previewRows">
+                <tr class="placeholder-row">
+                  <td colspan="4">Your linked rows will appear here after the PDFs are read.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <p class="column-note">
+            The export keeps all 9 sample columns. Link D displays “URL”; both it and the Detail cell link to the original destination. You can edit Detail text in the preview before exporting.
+          </p>
+        </aside>
+      </section>
+    </main>
+
+    <script src="script.js"></script>
+  </body>
+</html>
