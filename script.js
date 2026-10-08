@@ -8,7 +8,6 @@ const notice = document.getElementById('notice');
 const pageCount = document.getElementById('pageCount');
 const rowCount = document.getElementById('rowCount');
 const previewRows = document.getElementById('previewRows');
-const addRowButton = document.getElementById('addRowButton');
 
 let workbookData = null;
 let requestVersion = 0;
@@ -123,6 +122,31 @@ const actionsCell = () => {
   return cell;
 };
 
+const GROUP_COLUMNS = { header: 0, subHeader: 1 };
+
+// Header / sub header: the first row of a group is editable and its edits flow to the repeated rows below;
+// repeated (grey) cells are read-only.
+const groupCell = (row, key, title, repeated) => {
+  if (repeated) {
+    const cell = document.createElement('td');
+    cell.textContent = row[key];
+    cell.className = 'repeat-cell';
+    return cell;
+  }
+  const cell = editableCell(row, key, title);
+  let previous = row[key];
+  cell.addEventListener('input', () => {
+    const start = rows.indexOf(row);
+    for (let i = start + 1; i < rows.length && rows[i][key] === previous; i += 1) {
+      rows[i][key] = row[key];
+      const target = previewRows.querySelector(`[data-row-id="${rows[i].id}"]`)?.children[GROUP_COLUMNS[key]];
+      if (target) target.textContent = row[key];
+    }
+    previous = row[key];
+  });
+  return cell;
+};
+
 const renderPreview = () => {
   previewRows.replaceChildren();
   if (!rows.length) {
@@ -130,7 +154,7 @@ const renderPreview = () => {
     row.className = 'placeholder-row';
     const cell = document.createElement('td');
     cell.colSpan = 5;
-    cell.textContent = 'No rows yet. Read a PDF or use “Add row”.';
+    cell.textContent = 'No rows yet. Read a PDF to extract its links.';
     row.append(cell);
     previewRows.append(row);
     return;
@@ -151,12 +175,8 @@ const renderPreview = () => {
         editableCell(data, 'url', 'Full URL (https://…) this row links to'),
       );
     } else {
-      const header = document.createElement('td');
-      header.textContent = data.header;
-      if (data.header === lastHeader) header.className = 'repeat-cell';
-      const subHeader = document.createElement('td');
-      subHeader.textContent = data.subHeader;
-      if (data.subHeader === lastSubHeader) subHeader.className = 'repeat-cell';
+      const header = groupCell(data, 'header', 'Click to edit Header (applies to the rows below that repeat it)', data.header === lastHeader);
+      const subHeader = groupCell(data, 'subHeader', 'Click to edit sub header (applies to the rows below that repeat it)', data.subHeader === lastSubHeader);
       const link = document.createElement('td');
       const anchor = document.createElement('a');
       anchor.textContent = 'เปิดลิงก์ ↗';
@@ -258,12 +278,6 @@ previewRows.addEventListener('dragend', () => {
   previewRows.querySelectorAll('.dragging, .drop-target').forEach((el) => el.classList.remove('dragging', 'drop-target'));
 });
 
-addRowButton.addEventListener('click', () => {
-  if (!workbookData) workbookData = { files: [] };
-  insertRowAt(rows.length, rows[rows.length - 1]);
-  statusBadge.textContent = 'Ready to export';
-});
-
 const processFiles = async (files) => {
   const version = ++requestVersion;
   const pdfFiles = Array.from(files).filter(
@@ -272,12 +286,10 @@ const processFiles = async (files) => {
   const skippedFiles = files.length - pdfFiles.length;
   workbookData = null;
   generateButton.disabled = true;
-  addRowButton.disabled = true;
 
   if (!pdfFiles.length) {
     renderFileList([]);
     setRows([]);
-    addRowButton.disabled = false;
     pageCount.textContent = '0';
     rowCount.textContent = '0';
     statusBadge.textContent = 'PDF required';
@@ -310,7 +322,6 @@ const processFiles = async (files) => {
     setRows(result.rows);
     pageCount.textContent = String(result.pages);
     rowCount.textContent = String(result.rowCount);
-    addRowButton.disabled = false;
     generateButton.disabled = rows.length === 0;
 
     const fileErrors = result.errors || [];
@@ -341,7 +352,6 @@ const processFiles = async (files) => {
     if (version !== requestVersion) return;
     console.error('PDF conversion failed:', error);
     workbookData = null;
-    addRowButton.disabled = false;
     pageCount.textContent = '0';
     rowCount.textContent = '0';
     statusBadge.textContent = 'Conversion failed';
@@ -367,7 +377,6 @@ const downloadWorkbook = async () => {
   }
 
   generateButton.disabled = true;
-  addRowButton.disabled = true;
   statusBadge.textContent = 'Preparing Excel';
   setNotice('Building the workbook with your reviewed rows.');
 
@@ -408,7 +417,6 @@ const downloadWorkbook = async () => {
     statusBadge.textContent = 'Export failed';
     setNotice(error instanceof Error ? error.message : String(error), true);
   } finally {
-    addRowButton.disabled = false;
     updateSummary();
   }
 };
@@ -419,7 +427,6 @@ const clearFiles = () => {
   workbookData = null;
   pageCount.textContent = '0';
   statusBadge.textContent = 'Waiting for PDF';
-  addRowButton.disabled = false;
   renderFileList([]);
   setRows([]);
   setNotice('Only rows with a real clickable URL are included. PDF text or a visible “Click” label alone is not a URL.');
