@@ -186,6 +186,46 @@ h1 {
   margin-top: 14px;
 }
 
+.progress {
+  margin-top: 14px;
+}
+
+.progress[hidden] {
+  display: none;
+}
+
+.progress-head {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.progress-track {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--panel-soft);
+  border: 1px solid var(--line);
+}
+
+.progress-fill {
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 200ms ease;
+}
+
+.progress.done .progress-fill {
+  background: #a3d5b9;
+}
+
+.progress.failed .progress-fill {
+  background: var(--danger);
+}
+
 .empty-files {
   margin: 0;
   padding: 10px 2px;
@@ -349,10 +389,11 @@ th {
   letter-spacing: 0.035em;
 }
 
-th:nth-child(1) { width: 24%; }
-th:nth-child(2) { width: 30%; }
-th:nth-child(3) { width: 36%; }
-th:nth-child(4) { width: 10%; }
+th:nth-child(1) { width: 15%; }
+th:nth-child(2) { width: 19%; }
+th:nth-child(3) { width: 27%; }
+th:nth-child(4) { width: 14%; }
+th:nth-child(5) { width: 25%; }
 
 td {
   color: #cad4cf;
@@ -384,10 +425,67 @@ td a:hover {
   outline: none;
 }
 
+.repeat-cell {
+  color: #6f7c76;
+}
+
 .placeholder-row td {
   padding: 30px 18px;
   color: #87958f;
   text-align: center;
+}
+
+.actions-cell > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.drag-handle {
+  padding: 2px 4px;
+  color: #80918a;
+  cursor: grab;
+  user-select: none;
+}
+
+.row-button {
+  min-width: 30px;
+  height: 26px;
+  padding: 0 5px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  line-height: 1;
+}
+
+.row-button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.row-button.danger:hover {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+tr.custom-row {
+  background: rgba(163, 213, 185, 0.05);
+}
+
+tr.invalid {
+  outline: 1px solid var(--danger);
+  outline-offset: -1px;
+}
+
+tr.dragging {
+  opacity: 0.4;
+}
+
+tr.drop-target td {
+  border-bottom-color: var(--accent);
 }
 
 .column-note {

@@ -42,6 +42,14 @@
             <p class="empty-files">No files selected</p>
           </div>
 
+          <div class="progress" id="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" hidden>
+            <div class="progress-head">
+              <span id="progressLabel">Uploading…</span>
+              <span id="progressPercent">0%</span>
+            </div>
+            <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+          </div>
+
           <div class="button-row">
             <button class="primary-button" id="generateButton" type="button" disabled>
               Export Excel
@@ -76,18 +84,19 @@
                   <th>sub header</th>
                   <th>Detail</th>
                   <th>Link</th>
+                  <th>Row</th>
                 </tr>
               </thead>
               <tbody id="previewRows">
                 <tr class="placeholder-row">
-                  <td colspan="4">Your linked rows will appear here after the PDFs are read.</td>
+                  <td colspan="5">Your linked rows will appear here after the PDFs are read.</td>
                 </tr>
               </tbody>
             </table>
           </div>
 
           <p class="column-note">
-            The export keeps all 9 sample columns. Link D displays “URL”; both it and the Detail cell link to the original destination. You can edit Detail text in the preview before exporting.
+            The export keeps all 9 sample columns. Grey Header / sub header text repeats the row above (the Excel file shows it once per group). Only the Link column carries the hyperlink: it shows “URL” in Excel, and “เปิดลิงก์ ↗” in the preview. Detail is plain text. You can edit Detail on every row and Header / sub header on the first row of each group (the grey repeated cells follow it and are read-only; the Link of extracted rows stays the original URL), insert rows above or below (+↑ / +↓), reorder rows by dragging ⠿, and delete rows (✕) in the preview before exporting. Rows you add need a full http(s) URL.
           </p>
         </aside>
       </section>

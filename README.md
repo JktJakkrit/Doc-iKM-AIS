@@ -9,7 +9,7 @@ python -m pip install -r requirements.txt
 python server.py
 ```
 
-The terminal shows the server address after startup (and uses a nearby port if port 8000 is busy). Open that address and drop one or more browser-saved PDFs. Review the extracted rows and edit Detail text directly in the preview before exporting. The server listens only on the local computer. Use Ctrl+C in the terminal to stop it.
+The terminal shows the server address after startup (and uses a nearby port if port 8000 is busy). Open that address and drop one or more browser-saved PDFs. Review the extracted rows and edit Detail and group Header / sub header text directly in the preview before exporting. The server listens only on the local computer. Use Ctrl+C in the terminal to stop it.
 
 Export names are sanitized and limited to 31 characters, including the `.xlsx` extension.
 
