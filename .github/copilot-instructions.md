@@ -54,6 +54,7 @@ The important design boundary is: frontend uploads + preview, Python server orch
 - Keep Thai text exactly as extracted (including original misspellings) and never invent or guess a URL.
 - On `/api/convert`, the first page-1 row with no sub header gets `เมนูหลัก (หน้าแรก)` injected by `server.py`.
 - `.gitignore` excludes `*.pdf` and `*.xlsx`, so sample files are never committed.
+- Font sizes are rem-based and the root size is fluid (`html { font-size: clamp(16px, 0.55vw + 10px, 22px) }` in `styles.css`), so text grows with the screen; keep new sizes in `rem` rather than `px`.
 - Keep changes aligned with the existing pipeline: user-facing rules live in the browser layer, while extraction/export correctness remains in the Python server subprocess path.
 
 ## Repository-specific guidance
