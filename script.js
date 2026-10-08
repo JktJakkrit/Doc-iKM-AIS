@@ -13,7 +13,7 @@ const progressLabel = document.getElementById('progressLabel');
 const progressPercent = document.getElementById('progressPercent');
 const progressFill = document.getElementById('progressFill');
 
-let workbookData = null;
+
 let requestVersion = 0;
 let rows = [];
 let nextRowId = 1;
