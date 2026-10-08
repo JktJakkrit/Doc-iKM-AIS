@@ -42,6 +42,14 @@
             <p class="empty-files">No files selected</p>
           </div>
 
+          <div class="progress" id="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" hidden>
+            <div class="progress-head">
+              <span id="progressLabel">Uploading…</span>
+              <span id="progressPercent">0%</span>
+            </div>
+            <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+          </div>
+
           <div class="button-row">
             <button class="primary-button" id="generateButton" type="button" disabled>
               Export Excel

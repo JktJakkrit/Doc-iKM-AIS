@@ -8,12 +8,68 @@ const notice = document.getElementById('notice');
 const pageCount = document.getElementById('pageCount');
 const rowCount = document.getElementById('rowCount');
 const previewRows = document.getElementById('previewRows');
+const progress = document.getElementById('progress');
+const progressLabel = document.getElementById('progressLabel');
+const progressPercent = document.getElementById('progressPercent');
+const progressFill = document.getElementById('progressFill');
 
 let workbookData = null;
 let requestVersion = 0;
 let rows = [];
 let nextRowId = 1;
 let draggedRowId = null;
+let activeRequest = null;
+let progressTimer = null;
+let progressValue = 0;
+
+const UPLOAD_SHARE = 30;   // % of the bar covered by the real upload
+const PROCESS_CAP = 95;    // the server gives no progress, so processing creeps toward this and finishes on reply
+
+const setProgress = (value, label, state = '') => {
+  progressValue = Math.max(0, Math.min(100, value));
+  const shown = Math.round(progressValue);
+  progress.hidden = false;
+  progress.classList.toggle('done', state === 'done');
+  progress.classList.toggle('failed', state === 'failed');
+  progress.setAttribute('aria-valuenow', String(shown));
+  progressFill.style.width = `${shown}%`;
+  progressPercent.textContent = `${shown}%`;
+  if (label) progressLabel.textContent = label;
+};
+
+const stopProgressTimer = () => {
+  window.clearInterval(progressTimer);
+  progressTimer = null;
+};
+
+const hideProgress = () => {
+  stopProgressTimer();
+  progress.hidden = true;
+};
+
+const startProcessingProgress = (label) => {
+  stopProgressTimer();
+  setProgress(Math.max(progressValue, UPLOAD_SHARE), label);
+  progressTimer = window.setInterval(() => {
+    setProgress(progressValue + (PROCESS_CAP - progressValue) * 0.05, label);
+  }, 250);
+};
+
+const uploadPdfs = (body, onUploadProgress) =>
+  new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    activeRequest = xhr;
+    xhr.open('POST', '/api/convert');
+    xhr.responseType = 'json';
+    xhr.upload.addEventListener('progress', (event) => {
+      if (event.lengthComputable) onUploadProgress(event.loaded / event.total);
+    });
+    xhr.upload.addEventListener('load', () => onUploadProgress(1));
+    xhr.addEventListener('load', () => resolve({ ok: xhr.status >= 200 && xhr.status < 300, status: xhr.status, result: xhr.response || {} }));
+    xhr.addEventListener('error', () => reject(new Error('Could not reach the local server.')));
+    xhr.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
+    xhr.send(body);
+  });
 
 const setNotice = (message, isError = false) => {
   notice.textContent = message;
@@ -288,6 +344,7 @@ const processFiles = async (files) => {
   generateButton.disabled = true;
 
   if (!pdfFiles.length) {
+    hideProgress();
     renderFileList([]);
     setRows([]);
     pageCount.textContent = '0';
@@ -308,14 +365,22 @@ const processFiles = async (files) => {
   const body = new FormData();
   pdfFiles.forEach((file) => body.append('files', file, file.name));
 
+  activeRequest?.abort();
+  setProgress(0, 'Uploading PDF…');
+
   try {
-    const response = await fetch('/api/convert', {
-      method: 'POST',
-      body,
+    const { ok, status, result } = await uploadPdfs(body, (fraction) => {
+      if (version !== requestVersion) return;
+      if (fraction < 1) setProgress(fraction * UPLOAD_SHARE, 'Uploading PDF…');
+      else startProcessingProgress('Reading pages and extracting links…');
     });
-    const result = await response.json();
     if (version !== requestVersion) return;
-    if (!response.ok) throw new Error(result.error || `Conversion failed (${response.status}).`);
+    if (!ok) throw new Error(result.error || `Conversion failed (${status}).`);
+    stopProgressTimer();
+    setProgress(100, 'Done', 'done');
+    window.setTimeout(() => {
+      if (version === requestVersion) hideProgress();
+    }, 1200);
 
     workbookData = result;
     renderFileList(pdfFiles, result);
@@ -351,6 +416,8 @@ const processFiles = async (files) => {
   } catch (error) {
     if (version !== requestVersion) return;
     console.error('PDF conversion failed:', error);
+    stopProgressTimer();
+    setProgress(progressValue, 'Failed', 'failed');
     workbookData = null;
     pageCount.textContent = '0';
     rowCount.textContent = '0';
@@ -423,6 +490,8 @@ const downloadWorkbook = async () => {
 
 const clearFiles = () => {
   requestVersion += 1;
+  activeRequest?.abort();
+  hideProgress();
   sourceInput.value = '';
   workbookData = null;
   pageCount.textContent = '0';

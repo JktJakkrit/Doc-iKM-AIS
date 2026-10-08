@@ -186,6 +186,46 @@ h1 {
   margin-top: 14px;
 }
 
+.progress {
+  margin-top: 14px;
+}
+
+.progress[hidden] {
+  display: none;
+}
+
+.progress-head {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.progress-track {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--panel-soft);
+  border: 1px solid var(--line);
+}
+
+.progress-fill {
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 200ms ease;
+}
+
+.progress.done .progress-fill {
+  background: #a3d5b9;
+}
+
+.progress.failed .progress-fill {
+  background: var(--danger);
+}
+
 .empty-files {
   margin: 0;
   padding: 10px 2px;
