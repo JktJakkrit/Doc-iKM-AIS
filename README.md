@@ -15,24 +15,25 @@ The terminal shows the server address after startup (it uses a nearby port if 80
 
 ## Using it
 
-### 1. Convert a PDF
+### 1. Convert one or more PDFs
 
-In Chrome or Edge, open the iKM page and use Print → Save as PDF, then drop the file (or several) into the app.
+In Chrome or Edge, open the iKM page and use Print → Save as PDF, then drop the file(s) into the app. You can select several PDFs at once.
 
 - A screenshot, or a PDF printed as an image, has no link destinations, so nothing can be extracted from it.
 - Image-only buttons have no text in the PDF. The app describes them from the surrounding date / "Week N" label and card text. A button that is just a picture is described by its image name (read from the PDF's tags). The PDF does not keep the full image address, so that name is what you get.
-- A progress bar shows the upload and reading steps.
+- A progress bar shows the upload and reading steps. The upload area is an expansion panel: when reading finishes it folds up to a header line (`1 PDF · 22 pages · 57 links`) and the preview moves up. Click the header to open it again to add files; **Clear** also reopens it.
+- With several PDFs, the Output preview shows one tab per PDF (with its row count). Click a tab to view or edit just that PDF.
 
 ### 2. Review and export
 
-Edit the preview before exporting:
+Edit the preview before exporting (with several PDFs, edit each tab separately):
 
 - **Detail:** editable on every row.
 - **Header / sub header:** editable on the first row of each group. The grey repeated cells follow it and are read-only.
 - **Link:** the original URL and not editable. In Excel only the Link column carries the hyperlink, shown as `URL`. Detail is plain text.
 - **Rows:** insert above or below (`+↑` / `+↓`), reorder by dragging `⠿`, delete with `✕`. A row you add needs a full `http(s)` URL.
 
-Click **Export Excel**. Export names are sanitized and limited to 31 characters, including the `.xlsx` extension.
+Click **Export Excel**. All PDFs are combined into one `.xlsx` with one sheet per PDF, named after the PDF (a repeated name gets ` (2)`, and Excel limits sheet names to 31 characters). Export names are sanitized and limited to 31 characters, including the `.xlsx` extension.
 
 ## Project layout
 

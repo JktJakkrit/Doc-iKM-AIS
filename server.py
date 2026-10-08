@@ -48,6 +48,17 @@ def export_filename(source_names):
     return f"{base_name}{EXPORT_SUFFIX}"
 
 
+def unique_sheet_name(stem, used):
+    """The PDF's name as its Excel sheet / preview tab; a repeated name gets " (2)", " (3)" ..."""
+    base = stem.strip() or "PDF"
+    name, n = base, 1
+    while name.lower() in used:
+        n += 1
+        name = f"{base} ({n})"
+    used.add(name.lower())
+    return name
+
+
 def print_startup_banner(url):
     width = max(46, len(f"  URL      {url}"))
     use_color = sys.stdout.isatty() and "NO_COLOR" not in os.environ
@@ -149,6 +160,7 @@ class AppHandler(SimpleHTTPRequestHandler):
             return {"error": "Select at least one non-empty PDF file."}, 400
 
         all_pages = []
+        used_sheet_names = set()
         file_summaries = []
         errors = []
         with tempfile.TemporaryDirectory(prefix="ikm-pdf-excel-") as temp_dir:
@@ -186,7 +198,9 @@ class AppHandler(SimpleHTTPRequestHandler):
                     continue
 
                 extracted = json.loads(json_path.read_text(encoding="utf-8"))
+                sheet_name = unique_sheet_name(Path(filename).stem, used_sheet_names)
                 for page in extracted:
+                    page["sheet"] = sheet_name
                     for row in page.get("rows", []):
                         if row.get("page") == 1 and not row.get("sub_header"):
                             row["sub_header"] = "เมนูหลัก (หน้าแรก)"
@@ -235,6 +249,7 @@ class AppHandler(SimpleHTTPRequestHandler):
             rows = [
                 {
                     "header": page.get("header", ""),
+                    "sheet": page.get("sheet", ""),
                     "subHeader": item.get("sub_header", ""),
                     "detail": item.get("detail", ""),
                     "url": item.get("url", ""),
@@ -271,8 +286,9 @@ class AppHandler(SimpleHTTPRequestHandler):
             if not url:
                 continue
             header = str(row.get("header", "")).strip()
-            if not pages or pages[-1]["header"] != header:
-                pages.append({"header": header, "rows": []})
+            sheet = str(row.get("sheet", "")).strip()
+            if not pages or pages[-1]["header"] != header or pages[-1]["sheet"] != sheet:
+                pages.append({"header": header, "sheet": sheet, "rows": []})
             pages[-1]["rows"].append(
                 {
                     "sub_header": str(row.get("subHeader", "")).strip(),

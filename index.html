@@ -22,24 +22,40 @@
       </header>
 
       <section class="workspace" aria-label="PDF to Excel converter">
-        <div class="work-column">
-          <div
-            class="drop-zone"
-            id="dropZone"
-            tabindex="0"
-            role="button"
-            aria-label="Choose or drop PDF files"
-            aria-describedby="dropHelp"
+        <div class="work-column expansion-panel" id="uploadPanel">
+          <button
+            class="panel-header"
+            id="uploadToggle"
+            type="button"
+            aria-expanded="true"
+            aria-controls="uploadBody"
           >
-            <input id="sourceInput" type="file" accept=".pdf,application/pdf" multiple />
-            <span class="upload-icon" aria-hidden="true">↑</span>
-            <strong>Drop PDF files here</strong>
-            <span id="dropHelp">or browse to select one or more PDFs</span>
-            <small>Browser-saved PDFs preserve their clickable URLs</small>
-          </div>
+            <span class="panel-title">Upload PDF files</span>
+            <span class="panel-summary" id="uploadSummary">No files selected</span>
+            <span class="panel-chevron" aria-hidden="true">▾</span>
+          </button>
 
-          <div class="file-list" id="fileList" aria-live="polite">
-            <p class="empty-files">No files selected</p>
+          <div class="panel-body" id="uploadBody">
+            <div class="panel-inner">
+              <div
+                class="drop-zone"
+                id="dropZone"
+                tabindex="0"
+                role="button"
+                aria-label="Choose or drop PDF files"
+                aria-describedby="dropHelp"
+              >
+                <input id="sourceInput" type="file" accept=".pdf,application/pdf" multiple />
+                <span class="upload-icon" aria-hidden="true">↑</span>
+                <strong>Drop PDF files here</strong>
+                <span id="dropHelp">or browse to select one or more PDFs</span>
+                <small>Browser-saved PDFs preserve their clickable URLs</small>
+              </div>
+
+              <div class="file-list" id="fileList" aria-live="polite">
+                <p class="empty-files">No files selected</p>
+              </div>
+            </div>
           </div>
 
           <div class="progress" id="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" hidden>
@@ -76,6 +92,8 @@
             <span><strong id="rowCount">0</strong> link rows</span>
           </div>
 
+          <div class="sheet-tabs" id="sheetTabs" role="tablist" aria-label="PDF files (one Excel sheet each)" hidden></div>
+
           <div class="table-wrap">
             <table>
               <thead>
@@ -96,7 +114,7 @@
           </div>
 
           <p class="column-note">
-            The export keeps all 9 sample columns. Grey Header / sub header text repeats the row above (the Excel file shows it once per group). Only the Link column carries the hyperlink: it shows “URL” in Excel, and “เปิดลิงก์ ↗” in the preview. Detail is plain text. You can edit Detail on every row and Header / sub header on the first row of each group (the grey repeated cells follow it and are read-only; the Link of extracted rows stays the original URL), insert rows above or below (+↑ / +↓), reorder rows by dragging ⠿, and delete rows (✕) in the preview before exporting. Rows you add need a full http(s) URL.
+            The export keeps all 9 sample columns. With several PDFs, pick a tab to view or edit one PDF; export combines all PDFs into one workbook with one sheet each. Grey Header / sub header text repeats the row above (the Excel file shows it once per group). Only the Link column carries the hyperlink: it shows “URL” in Excel, and “เปิดลิงก์ ↗” in the preview. Detail is plain text. You can edit Detail on every row and Header / sub header on the first row of each group (the grey repeated cells follow it and are read-only; the Link of extracted rows stays the original URL), insert rows above or below (+↑ / +↓), reorder rows by dragging ⠿, and delete rows (✕) in the preview before exporting. Rows you add need a full http(s) URL.
           </p>
         </aside>
       </section>
