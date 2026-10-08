@@ -593,6 +593,7 @@ th:first-child {
 }
 
 th {
+  position: sticky;
   z-index: 1;
   top: 0;
   background: #202a2d;
@@ -601,11 +602,13 @@ th {
   letter-spacing: 0.035em;
 }
 
-th:nth-child(1) { width: 16%; }
-th:nth-child(2) { width: 20%; }
-th:nth-child(3) { width: 36%; }
-th:nth-child(4) { width: 12%; }
-th:nth-child(5) { width: 16%; }
+/* Six columns: #, Header, sub header, Detail, Link, Row tools */
+th:nth-child(1) { width: 5%; }
+th:nth-child(2) { width: 14%; }
+th:nth-child(3) { width: 18%; }
+th:nth-child(4) { width: 31%; }
+th:nth-child(5) { width: 11%; }
+th:nth-child(6) { width: 21%; }
 
 td {
   color: #cad4cf;

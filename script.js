@@ -24,7 +24,6 @@ uploadToggle.addEventListener('click', () => {
 const sheetTabs = document.getElementById('sheetTabs');
 const rowFilter = document.getElementById('rowFilter');
 const filterCount = document.getElementById('filterCount');
-const undoButton = document.getElementById('undoButton');
 const copyButton = document.getElementById('copyButton');
 let activeSheet = '';
 const progress = document.getElementById('progress');
@@ -43,8 +42,6 @@ let progressValue = 0;
 let loadedFiles = [];     // every PDF read so far: { name, pages, rows, error }
 let busy = false;          // a PDF batch is being uploaded / read
 let filterText = '';
-const undoStack = [];      // structural edits (delete / insert / move), undone last-in first-out
-const UNDO_LIMIT = 100;
 
 const UPLOAD_SHARE = 30;   // % of the bar covered by the real upload
 const PROCESS_CAP = 95;    // the server gives no progress, so processing creeps toward this and finishes on reply
@@ -100,6 +97,8 @@ const setNotice = (message, isError = false) => {
   notice.classList.toggle('error', isError);
 };
 
+const plural = (count, word) => `${count} ${word}${count === 1 ? '' : 's'}`;
+
 const renderFileList = (pending = []) => {
   fileList.replaceChildren();
   if (!loadedFiles.length && !pending.length) {
@@ -127,7 +126,7 @@ const renderFileList = (pending = []) => {
   loadedFiles.forEach((file) =>
     file.error
       ? addItem(file.name, `Error: ${file.error}`, true)
-      : addItem(file.name, `${file.pages} pages · ${file.rows} links`),
+      : addItem(file.name, `${plural(file.pages, 'page')} · ${plural(file.rows, 'link')}`),
   );
   pending.forEach((file) => addItem(file.name, 'Reading…'));
 };
@@ -138,7 +137,7 @@ const refreshUploadSummary = () => {
     return;
   }
   const pages = loadedFiles.reduce((sum, file) => sum + (file.pages || 0), 0);
-  uploadSummary.textContent = `${loadedFiles.length} PDF${loadedFiles.length > 1 ? 's' : ''} · ${pages} pages · ${rows.length} links`;
+  uploadSummary.textContent = `${plural(loadedFiles.length, 'PDF')} · ${plural(pages, 'page')} · ${plural(rows.length, 'link')}`;
   pageCount.textContent = String(pages);
 };
 
@@ -172,7 +171,6 @@ const isHttpUrl = (value) => {
 const updateSummary = () => {
   rowCount.textContent = String(rows.length);
   generateButton.disabled = rows.length === 0;
-  undoButton.disabled = undoStack.length === 0;
   copyButton.disabled = !rows.some((data) => data.sheet === activeSheet);
 };
 
@@ -377,7 +375,6 @@ const refreshRows = () => {
 
 const setRows = (nextRows) => {
   rows = nextRows.map((data) => createRow(data));
-  undoStack.length = 0;
   activeSheet = rows[0]?.sheet ?? '';
   refreshRows();
 };
@@ -391,16 +388,10 @@ sheetTabs.addEventListener('click', (event) => {
 
 const rowIndexOf = (id) => rows.findIndex((row) => row.id === Number(id));
 
-const pushUndo = (entry) => {
-  undoStack.push(entry);
-  if (undoStack.length > UNDO_LIMIT) undoStack.shift();
-};
-
 const moveRow = (from, to) => {
   if (from < 0 || to < 0 || to >= rows.length || from === to) return;
   const [moved] = rows.splice(from, 1);
   rows.splice(to, 0, moved);
-  pushUndo({ type: 'move', from, to });
   refreshRows();
 };
 
@@ -412,43 +403,14 @@ const insertRowAt = (position, inheritFrom) => {
     sheet: inheritFrom?.sheet ?? '',
   });
   rows.splice(position, 0, row);
-  pushUndo({ type: 'insert', id: row.id });
   refreshRows();
   previewRows.querySelector(`[data-row-id="${row.id}"] .editable-cell:nth-child(4)`)?.focus();
 };
 
 const deleteRow = (index) => {
-  const [removed] = rows.splice(index, 1);
-  pushUndo({ type: 'delete', row: removed, index });
+  rows.splice(index, 1);
   refreshRows();
 };
-
-// Undo steps run last-in first-out, so the row positions recorded in each step still match the table.
-const undo = () => {
-  const step = undoStack.pop();
-  if (!step) return;
-  if (step.type === 'delete') {
-    rows.splice(step.index, 0, step.row);
-    activeSheet = step.row.sheet;
-  } else if (step.type === 'insert') {
-    const at = rowIndexOf(step.id);
-    if (at >= 0) rows.splice(at, 1);
-  } else if (step.type === 'move') {
-    const [moved] = rows.splice(step.to, 1);
-    rows.splice(step.from, 0, moved);
-    activeSheet = moved.sheet;
-  }
-  refreshRows();
-  setNotice('Undid the last change.');
-};
-
-undoButton.addEventListener('click', undo);
-document.addEventListener('keydown', (event) => {
-  if (!(event.ctrlKey || event.metaKey) || event.shiftKey || event.key.toLowerCase() !== 'z') return;
-  if (event.target.closest?.('[contenteditable="true"], input, textarea')) return;   // keep native text undo while typing
-  event.preventDefault();
-  undo();
-});
 
 rowFilter.addEventListener('input', () => {
   filterText = rowFilter.value.trim().toLowerCase();
