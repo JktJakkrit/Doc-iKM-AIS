@@ -8,12 +8,27 @@ const notice = document.getElementById('notice');
 const pageCount = document.getElementById('pageCount');
 const rowCount = document.getElementById('rowCount');
 const previewRows = document.getElementById('previewRows');
+const uploadToggle = document.getElementById('uploadToggle');
+const uploadBody = document.getElementById('uploadBody');
+const uploadSummary = document.getElementById('uploadSummary');
+
+const setUploadExpanded = (expanded) => {
+  uploadToggle.setAttribute('aria-expanded', String(expanded));
+  uploadBody.classList.toggle('collapsed', !expanded);
+  uploadBody.querySelector('.panel-inner').inert = !expanded;
+};
+
+uploadToggle.addEventListener('click', () => {
+  setUploadExpanded(uploadToggle.getAttribute('aria-expanded') !== 'true');
+});
+const sheetTabs = document.getElementById('sheetTabs');
+let activeSheet = '';
 const progress = document.getElementById('progress');
 const progressLabel = document.getElementById('progressLabel');
 const progressPercent = document.getElementById('progressPercent');
 const progressFill = document.getElementById('progressFill');
 
-let workbookData = null;
+
 let requestVersion = 0;
 let rows = [];
 let nextRowId = 1;
@@ -119,6 +134,7 @@ const createRow = (values = {}) => ({
   id: nextRowId++,
   header: '',
   subHeader: '',
+  sheet: '',
   detail: '',
   url: '',
   page: 0,
@@ -140,6 +156,20 @@ const updateSummary = () => {
   generateButton.disabled = rows.length === 0;
 };
 
+const insertPlainText = (text) => {
+  if (document.execCommand('insertText', false, text)) return;
+  const selection = window.getSelection();
+  if (!selection?.rangeCount) return;
+  const range = selection.getRangeAt(0);
+  range.deleteContents();
+  const node = document.createTextNode(text);
+  range.insertNode(node);
+  range.setStartAfter(node);
+  range.collapse(true);
+  selection.removeAllRanges();
+  selection.addRange(range);
+};
+
 const editableCell = (row, key, title) => {
   const cell = document.createElement('td');
   cell.textContent = row[key];
@@ -147,6 +177,18 @@ const editableCell = (row, key, title) => {
   cell.spellcheck = false;
   cell.className = 'editable-cell';
   cell.title = title;
+  // Pasted HTML would bring its own colours / fonts (e.g. black text on the dark table): keep plain text only.
+  cell.addEventListener('paste', (event) => {
+    event.preventDefault();
+    const text = (event.clipboardData?.getData('text/plain') ?? '').replace(/\s*[\r\n]+\s*/g, ' ');
+    insertPlainText(text);
+  });
+  cell.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      cell.blur();
+    }
+  });
   cell.addEventListener('input', () => {
     row[key] = cell.textContent;
     cell.closest('tr')?.classList.remove('invalid');
@@ -193,7 +235,7 @@ const groupCell = (row, key, title, repeated) => {
   let previous = row[key];
   cell.addEventListener('input', () => {
     const start = rows.indexOf(row);
-    for (let i = start + 1; i < rows.length && rows[i][key] === previous; i += 1) {
+    for (let i = start + 1; i < rows.length && rows[i].sheet === row.sheet && rows[i][key] === previous; i += 1) {
       rows[i][key] = row[key];
       const target = previewRows.querySelector(`[data-row-id="${rows[i].id}"]`)?.children[GROUP_COLUMNS[key]];
       if (target) target.textContent = row[key];
@@ -203,8 +245,34 @@ const groupCell = (row, key, title, repeated) => {
   return cell;
 };
 
+const renderSheetTabs = () => {
+  const sheets = [...new Set(rows.map((data) => data.sheet))];
+  if (!sheets.includes(activeSheet)) activeSheet = sheets[0] ?? '';
+  sheetTabs.replaceChildren();
+  sheetTabs.hidden = sheets.length < 2;
+  if (sheets.length < 2) return;
+  sheets.forEach((sheet) => {
+    const tab = document.createElement('button');
+    tab.type = 'button';
+    tab.className = 'sheet-tab';
+    tab.role = 'tab';
+    tab.dataset.sheet = sheet;
+    tab.title = sheet;
+    tab.setAttribute('aria-selected', String(sheet === activeSheet));
+    const name = document.createElement('span');
+    name.className = 'sheet-tab-name';
+    name.textContent = sheet || '(no name)';
+    const count = document.createElement('span');
+    count.className = 'sheet-tab-count';
+    count.textContent = String(rows.filter((data) => data.sheet === sheet).length);
+    tab.append(name, count);
+    sheetTabs.append(tab);
+  });
+};
+
 const renderPreview = () => {
   previewRows.replaceChildren();
+  renderSheetTabs();
   if (!rows.length) {
     const row = document.createElement('tr');
     row.className = 'placeholder-row';
@@ -216,9 +284,11 @@ const renderPreview = () => {
     return;
   }
 
+  // With several PDFs only the selected one is listed; export still writes every one, one sheet each.
+  const visibleRows = rows.filter((data) => data.sheet === activeSheet);
   let lastHeader = '';
   let lastSubHeader = '';
-  rows.forEach((data) => {
+  visibleRows.forEach((data) => {
     const row = document.createElement('tr');
     row.dataset.rowId = String(data.id);
 
@@ -262,8 +332,16 @@ const refreshRows = () => {
 
 const setRows = (nextRows) => {
   rows = nextRows.map((data) => createRow(data));
+  activeSheet = rows[0]?.sheet ?? '';
   refreshRows();
 };
+
+sheetTabs.addEventListener('click', (event) => {
+  const tab = event.target.closest('.sheet-tab');
+  if (!tab || tab.dataset.sheet === activeSheet) return;
+  activeSheet = tab.dataset.sheet;
+  refreshRows();
+});
 
 const rowIndexOf = (id) => rows.findIndex((row) => row.id === Number(id));
 
@@ -279,6 +357,7 @@ const insertRowAt = (position, inheritFrom) => {
     custom: true,
     header: inheritFrom?.header ?? '',
     subHeader: inheritFrom?.subHeader ?? '',
+    sheet: inheritFrom?.sheet ?? '',
   });
   rows.splice(position, 0, row);
   refreshRows();
@@ -345,6 +424,8 @@ const processFiles = async (files) => {
 
   if (!pdfFiles.length) {
     hideProgress();
+    setUploadExpanded(true);
+    uploadSummary.textContent = 'No PDF selected';
     renderFileList([]);
     setRows([]);
     pageCount.textContent = '0';
@@ -355,6 +436,7 @@ const processFiles = async (files) => {
   }
 
   renderFileList(pdfFiles);
+  uploadSummary.textContent = `Reading ${pdfFiles.length} PDF${pdfFiles.length > 1 ? 's' : ''}…`;
   setRows([]);
   generateButton.disabled = true;
   pageCount.textContent = '…';
@@ -378,6 +460,8 @@ const processFiles = async (files) => {
     if (!ok) throw new Error(result.error || `Conversion failed (${status}).`);
     stopProgressTimer();
     setProgress(100, 'Done', 'done');
+    uploadSummary.textContent = `${pdfFiles.length} PDF${pdfFiles.length > 1 ? 's' : ''} · ${result.pages} pages · ${result.rowCount} links`;
+    setUploadExpanded(false);
     window.setTimeout(() => {
       if (version === requestVersion) hideProgress();
     }, 1200);
@@ -410,7 +494,9 @@ const processFiles = async (files) => {
     } else {
       statusBadge.textContent = 'Ready to export';
       setNotice(
-        `${result.rowCount} linked rows from ${pdfFiles.length} PDF(s) and ${result.pages} pages. Navigation links were skipped, as specified by the skill.`,
+        `${result.rowCount} linked rows from ${pdfFiles.length} PDF(s) and ${result.pages} pages. Navigation links were skipped, as specified by the skill.${
+          pdfFiles.length > 1 ? ' Pick a PDF tab to view or edit it; Export Excel combines all of them into one workbook, one sheet per PDF.' : ''
+        }`,
       );
     }
   } catch (error) {
@@ -418,6 +504,8 @@ const processFiles = async (files) => {
     console.error('PDF conversion failed:', error);
     stopProgressTimer();
     setProgress(progressValue, 'Failed', 'failed');
+    setUploadExpanded(true);
+    uploadSummary.textContent = 'Could not read the PDF';
     workbookData = null;
     pageCount.textContent = '0';
     rowCount.textContent = '0';
@@ -435,11 +523,17 @@ const downloadWorkbook = async () => {
 
   const invalidIndex = rows.findIndex((data) => data.custom && !isHttpUrl(data.url.trim()));
   if (invalidIndex >= 0) {
+    if (rows[invalidIndex].sheet !== activeSheet) {
+      activeSheet = rows[invalidIndex].sheet;
+      refreshRows();
+    }
     const invalidRow = previewRows.querySelector(`[data-row-id="${rows[invalidIndex].id}"]`);
     invalidRow?.classList.add('invalid');
     invalidRow?.scrollIntoView({ block: 'center' });
     statusBadge.textContent = 'Check rows';
-    setNotice(`Row ${invalidIndex + 1} needs a full URL starting with http:// or https://, or delete the row.`, true);
+    const where = rows[invalidIndex].sheet ? ` in “${rows[invalidIndex].sheet}”` : '';
+    const position = rows.filter((data) => data.sheet === rows[invalidIndex].sheet).indexOf(rows[invalidIndex]) + 1;
+    setNotice(`Row ${position}${where} needs a full URL starting with http:// or https://, or delete the row.`, true);
     return;
   }
 
@@ -448,11 +542,12 @@ const downloadWorkbook = async () => {
   setNotice('Building the workbook with your reviewed rows.');
 
   try {
-    const reviewedRows = rows.map(({ header, subHeader, detail, url }) => ({
+    const reviewedRows = rows.map(({ header, subHeader, detail, url, sheet }) => ({
       header: header.trim(),
       subHeader: subHeader.trim(),
       detail: detail.trim(),
       url: url.trim(),
+      sheet: (sheet || '').trim(),
     }));
     const response = await fetch('/api/export', {
       method: 'POST',
@@ -492,6 +587,8 @@ const clearFiles = () => {
   requestVersion += 1;
   activeRequest?.abort();
   hideProgress();
+  setUploadExpanded(true);
+  uploadSummary.textContent = 'No files selected';
   sourceInput.value = '';
   workbookData = null;
   pageCount.textContent = '0';

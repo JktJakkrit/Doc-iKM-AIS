@@ -16,6 +16,11 @@
   box-sizing: border-box;
 }
 
+html {
+  /* Scales every rem-based size with the screen: ~16px on small windows up to ~22px on large monitors. */
+  font-size: clamp(16px, 0.55vw + 10px, 22px);
+}
+
 body {
   min-width: 320px;
   min-height: 100vh;
@@ -33,9 +38,12 @@ input {
 }
 
 .app {
-  width: min(1360px, 100%);
-  margin: 0 auto;
-  padding: clamp(24px, 5vw, 64px);
+  display: flex;
+  width: 100%;
+  min-height: 100vh;
+  flex-direction: column;
+  margin: 0;
+  padding: clamp(24px, 4vw, 56px);
 }
 
 .app-header {
@@ -62,7 +70,7 @@ input {
 .eyebrow {
   margin: 0 0 10px;
   color: var(--accent);
-  font-size: 0.7rem;
+  font-size: 0.78rem;
   font-weight: 700;
   letter-spacing: 0.17em;
   text-transform: uppercase;
@@ -92,10 +100,10 @@ h1 {
 }
 
 .workspace {
-  display: grid;
-  grid-template-columns: minmax(280px, 0.72fr) minmax(0, 1.28fr);
+  display: flex;
+  flex: 1;
+  flex-direction: column;
   gap: 22px;
-  align-items: start;
 }
 
 .work-column,
@@ -108,7 +116,77 @@ h1 {
 }
 
 .work-column {
+  display: flex;
+  flex-direction: column;
   padding: 20px;
+}
+
+/* Expansion panel: the header always shows; the body (drop zone + file list) folds away. */
+.panel-header {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 14px;
+  padding: 2px 4px 2px 6px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+
+.panel-header:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+  border-radius: 10px;
+}
+
+.panel-title {
+  flex: 0 0 auto;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.panel-summary {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.95rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.panel-chevron {
+  flex: 0 0 auto;
+  color: var(--accent);
+  font-size: 1.2rem;
+  transition: transform 240ms ease;
+}
+
+.panel-header[aria-expanded="false"] .panel-chevron {
+  transform: rotate(-90deg);
+}
+
+.panel-body {
+  display: grid;
+  grid-template-rows: 1fr;
+  margin-top: 14px;
+  transition: grid-template-rows 260ms ease, margin-top 260ms ease;
+}
+
+.panel-body.collapsed {
+  grid-template-rows: 0fr;
+  margin-top: 0;
+}
+
+.panel-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.preview {
+  flex: 1;
 }
 
 .drop-zone {
@@ -149,13 +227,13 @@ h1 {
 }
 
 .drop-zone > span:not(.upload-icon) {
-  font-size: 0.88rem;
+  font-size: 1rem;
 }
 
 .drop-zone small {
   margin-top: 4px;
   color: #80918a;
-  font-size: 0.75rem;
+  font-size: 0.85rem;
 }
 
 .upload-icon {
@@ -180,6 +258,7 @@ h1 {
 
 .file-list {
   display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 8px;
   max-height: 220px;
   overflow: auto;
@@ -199,7 +278,7 @@ h1 {
   justify-content: space-between;
   margin-bottom: 6px;
   color: var(--muted);
-  font-size: 0.8rem;
+  font-size: 0.9rem;
 }
 
 .progress-track {
@@ -230,7 +309,7 @@ h1 {
   margin: 0;
   padding: 10px 2px;
   color: #7f9089;
-  font-size: 0.85rem;
+  font-size: 0.95rem;
 }
 
 .file-item {
@@ -245,12 +324,12 @@ h1 {
 .file-name {
   overflow-wrap: anywhere;
   color: var(--text);
-  font-size: 0.84rem;
+  font-size: 0.95rem;
 }
 
 .file-count {
   color: var(--good);
-  font-size: 0.75rem;
+  font-size: 0.85rem;
 }
 
 .error-text,
@@ -276,7 +355,7 @@ h1 {
 }
 
 .primary-button {
-  flex: 1;
+  flex: 0 1 280px;
   padding: 0 22px;
   background: linear-gradient(130deg, #e9c486, var(--accent));
   color: var(--accent-ink);
@@ -306,7 +385,7 @@ h1 {
 .notice {
   margin: 16px 2px 0;
   color: #8fa099;
-  font-size: 0.78rem;
+  font-size: 0.9rem;
   line-height: 1.6;
 }
 
@@ -337,7 +416,7 @@ h1 {
   border-radius: 999px;
   background: rgba(163, 213, 185, 0.08);
   color: var(--good);
-  font-size: 0.68rem;
+  font-size: 0.78rem;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -348,16 +427,69 @@ h1 {
   gap: 20px;
   padding: 0 24px 18px;
   color: var(--muted);
-  font-size: 0.82rem;
+  font-size: 0.95rem;
 }
 
 .summary strong {
   color: var(--text);
-  font-size: 1rem;
+  font-size: 1.15rem;
+}
+
+.sheet-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 24px 12px;
+}
+
+.sheet-tabs[hidden] {
+  display: none;
+}
+
+.sheet-tab {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+  max-width: 320px;
+  min-height: 38px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.92rem;
+  cursor: pointer;
+}
+
+.sheet-tab:hover {
+  border-color: #53635f;
+  color: var(--text);
+}
+
+.sheet-tab[aria-selected="true"] {
+  border-color: var(--accent);
+  background: rgba(227, 178, 103, 0.1);
+  color: var(--accent);
+}
+
+.sheet-tab-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sheet-tab-count {
+  flex: 0 0 auto;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--panel-soft);
+  font-size: 0.8rem;
 }
 
 .table-wrap {
-  max-height: min(60vh, 600px);
+  max-height: min(72vh, 900px);
   overflow: auto;
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
@@ -367,12 +499,12 @@ table {
   width: 100%;
   border-collapse: collapse;
   table-layout: fixed;
-  font-size: 0.81rem;
+  font-size: 0.95rem;
 }
 
 th,
 td {
-  padding: 11px 13px;
+  padding: 12px 14px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.055);
   overflow-wrap: anywhere;
   text-align: left;
@@ -385,15 +517,15 @@ th {
   top: 0;
   background: #202a2d;
   color: var(--accent);
-  font-size: 0.7rem;
+  font-size: 0.8rem;
   letter-spacing: 0.035em;
 }
 
-th:nth-child(1) { width: 15%; }
-th:nth-child(2) { width: 19%; }
-th:nth-child(3) { width: 27%; }
-th:nth-child(4) { width: 14%; }
-th:nth-child(5) { width: 25%; }
+th:nth-child(1) { width: 16%; }
+th:nth-child(2) { width: 20%; }
+th:nth-child(3) { width: 36%; }
+th:nth-child(4) { width: 12%; }
+th:nth-child(5) { width: 16%; }
 
 td {
   color: #cad4cf;
@@ -450,9 +582,10 @@ td a:hover {
 }
 
 .row-button {
-  min-width: 30px;
-  height: 26px;
-  padding: 0 5px;
+  min-width: 36px;
+  height: 32px;
+  padding: 0 6px;
+  font-size: 0.9rem;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: transparent;
@@ -492,15 +625,11 @@ tr.drop-target td {
   margin: 0;
   padding: 16px 24px 20px;
   color: #8fa099;
-  font-size: 0.77rem;
+  font-size: 0.88rem;
   line-height: 1.55;
 }
 
 @media (max-width: 860px) {
-  .workspace {
-    grid-template-columns: 1fr;
-  }
-
   .drop-zone {
     min-height: 210px;
   }
@@ -539,7 +668,7 @@ tr.drop-target td {
   th,
   td {
     padding: 9px 8px;
-    font-size: 0.72rem;
+    font-size: 0.85rem;
   }
 
   .column-note {

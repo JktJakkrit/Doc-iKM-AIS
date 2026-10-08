@@ -3,7 +3,8 @@
 
 Input (pick one):
   --text  FILE   pasted page text, pipe-separated rows, pages separated by a line of --- or ===
-  --json  FILE   [{"header": "...", "rows": [{"sub_header": "...", "detail": "...", "url": "https://..."}]}]
+  --json  FILE   [{"header": "...", "sheet": "optional sheet name", "rows": [{"sub_header": "...", "detail": "...", "url": "https://..."}]}]
+                 pages that share a "sheet" go on the same worksheet; each distinct sheet becomes its own tab
 
 Output:
   --output FILE.xlsx          new workbook (or --append to add to an existing one)
@@ -119,27 +120,59 @@ def existing_keys(ws):
     return seen
 
 
+def new_sheet(ws):
+    ws.append(COLUMNS)
+    for i, w in enumerate(WIDTHS, start=1):
+        ws.column_dimensions[ws.cell(1, i).column_letter].width = w
+    for c in ws[1]:
+        c.font = Font(bold=True)
+    ws.freeze_panes = "A2"
+    return ws
+
+
+def sheet_title(name, used):
+    """A valid, unique Excel sheet name (max 31 chars, none of []:*?/\\), comparing case-insensitively."""
+    base = re.sub(r"[\[\]:*?/\\]", " ", name or "")
+    base = re.sub(r"\s+", " ", base).strip(" '") or "Sheet"
+    title, n = base[:31], 1
+    while title.lower() in used:
+        n += 1
+        suffix = f" ({n})"
+        title = base[:31 - len(suffix)].rstrip() + suffix
+    used.add(title.lower())
+    return title
+
+
 def write(pages, args):
     if args.append:
         wb = load_workbook(args.append)
         ws = wb.active
         if ws.max_row < 1 or ws.cell(1, 1).value is None:
             ws.append(COLUMNS)
+        sheets = {}
     else:
         wb = Workbook()
-        ws = wb.active
-        ws.title = "Sheet1"
-        ws.append(COLUMNS)
-        for i, w in enumerate(WIDTHS, start=1):
-            ws.column_dimensions[ws.cell(1, i).column_letter].width = w
-        for c in ws[1]:
-            c.font = Font(bold=True)
-        ws.freeze_panes = "A2"
+        ws = None
+        sheets = {}   # requested sheet name -> [worksheet, seen keys]
+    used_titles = {s.title.lower() for s in wb.worksheets} if args.append else set()
 
-    # Skip rows already in the workbook so re-running a batch is safe. A row is "the same" only if Header,
+    def sheet_for(name):
+        nonlocal ws
+        if args.append:
+            return ws, appended_seen
+        if name not in sheets:
+            if not sheets:
+                target = wb.active
+            else:
+                target = wb.create_sheet()
+            target.title = sheet_title(name, used_titles)
+            sheets[name] = [new_sheet(target), set()]
+        return sheets[name]
+
+    # Skip rows already in the sheet so re-running a batch is safe. A row is "the same" only if Header,
     # sub header, Detail and URL all match: the same link (e.g. "My Order CLICK") legitimately appears under
     # many different problems and must be kept for each of them.
-    seen = existing_keys(ws) if args.append else set()
+    appended_seen = existing_keys(ws) if args.append else set()
     added = skipped = 0
     empty_pages = []
 
@@ -148,6 +181,7 @@ def write(pages, args):
         if not rows:
             empty_pages.append(page["header"] or "(no title)")
             continue
+        ws, seen = sheet_for(page.get("sheet") or "Sheet1")
         last_sub = None
         first = True
         for r in rows:
@@ -173,9 +207,13 @@ def write(pages, args):
             first = False
             added += 1
 
+    if not args.append and not sheets:
+        new_sheet(wb.active).title = "Sheet1"
+
     out = args.output or args.append
     wb.save(out)
-    print(f"saved {out}: {added} rows added, {skipped} duplicates skipped, {len(pages)} pages read")
+    print(f"saved {out}: {added} rows added, {skipped} duplicates skipped, {len(pages)} pages read, "
+          f"{len(wb.worksheets)} sheet(s)")
     if empty_pages:
         print(f"WARNING {len(empty_pages)} page(s) had no URL rows: " + "; ".join(empty_pages), file=sys.stderr)
 

@@ -16,8 +16,10 @@ How the columns are guessed (always review the preview before building the workb
              the last left-column cell above the link is the problem label (title lines only,
              up to the first "- bullet" line). Labels carry across page breaks.
   Detail     the text line(s) the link sits on. For a bare "คลิก" / image button, the date or "Week N" label
-             above it plus the card text just above the button (sub header = the month heading); an icon
-             with no text at all is described by the target it points to.
+             above it plus the card text just above the button (sub header = the month heading). An image-only
+             link uses the image name from the PDF's tag tree (the file name from "Copy image address", no
+             extension), plus any visible text inside the clickable area; with no image name it falls back to
+             the link's #fragment.
 Internal navigation links ("กลับเมนูด้านบน", #Home, top menu #P1..#P9) are skipped unless --include-nav.
 """
 import argparse
@@ -41,6 +43,7 @@ NUMBERED = re.compile(r"^\W*\d+\s*\.")
 BULLET = re.compile(r"^\s*[-–•+]")
 COLUMN_TITLES = {"ปัญหาที่พบ", "แนวทางแก้ไข"}
 GENERIC = re.compile(r"^(คลิก(ที่นี่|ดู)?|click( here)?|here|url)$", re.I)
+ALT = re.compile(r"/Alt \(([^)]*)\)")
 THAI_MONTHS = "มกราคม|กุมภาพันธ์|มีนาคม|เมษายน|พฤษภาคม|มิถุนายน|กรกฎาคม|สิงหาคม|กันยายน|ตุลาคม|พฤศจิกายน|ธันวาคม"
 DATE_LABEL = re.compile(rf"^\d{{1,2}}(\s*-\s*\d{{1,2}})?\s+({THAI_MONTHS})")
 WEEK_LABEL = re.compile(r"^Week\s*\d+$", re.I)
@@ -181,6 +184,51 @@ def with_lead_in(ls, lines, icons):
     return text
 
 
+def figure_alts(doc):
+    """{link annotation xref: [image names]} from the PDF's structure tree.
+
+    Chrome's tagged PDFs keep each <img> as a Figure whose /Alt is the image's file name (the tail of "Copy
+    image address", without extension). A Link structure element holds its Figure child(ren) plus an OBJR that
+    points at the link annotation, which is how an image-only link is tied to its picture.
+    """
+    def alts_under(xref, depth=0):
+        obj = " ".join(doc.xref_object(xref, compressed=False).split())
+        found = []
+        if "/S /Figure" in obj:
+            m = ALT.search(obj)
+            if m:
+                found.append(m.group(1))
+        if depth < 4:
+            for child in re.finditer(r"(\d+) 0 R", re.sub(r"/(P|Pg|Obj) \d+ 0 R", "", obj)):
+                found += alts_under(int(child.group(1)), depth + 1)
+        return found
+
+    result = {}
+    for xref in range(1, doc.xref_length()):
+        try:
+            obj = " ".join(doc.xref_object(xref, compressed=False).split())
+        except Exception:
+            continue
+        if "/S /Link" not in obj or "/OBJR" not in obj:
+            continue
+        annots = [int(n) for n in re.findall(r"/Obj (\d+) 0 R", obj)]
+        alts = []
+        for child in re.finditer(r"(\d+) 0 R", re.sub(r"/(P|Pg|Obj) \d+ 0 R", "", obj)):
+            alts += alts_under(int(child.group(1)))
+        if alts:
+            for a in annots:
+                result[a] = alts
+    return result
+
+
+def text_inside(lk):
+    """Visible text lines lying inside the link's rectangle (text printed over / inside the clickable area)."""
+    out = [l["text"] for l in lk["all_lines"]
+           if lk["x"] - 2 <= (l["x0"] + l["x1"]) / 2 <= lk["x1"] + 2 and lk["y"] - 2 <= (l["y0"] + l["y1"]) / 2 <= lk["y1"] + 2
+           and not is_generic(l["text"])]
+    return " ".join(out)
+
+
 def collect_links(doc, include_nav):
     links = []
     for pno, page in enumerate(doc, start=1):
@@ -198,7 +246,7 @@ def collect_links(doc, include_nav):
             on_line = [l for l in lines if l["y0"] - 2 <= mid <= l["y1"] + 2 and l["x0"] - 2 <= r.x1 and l["x1"] + 2 >= r.x0]
             links.append({"page": pno, "y": r.y0, "y1": r.y1, "x": r.x0, "x1": r.x1, "url": uri, "lines": on_line,
                           "fallback": squash(page.get_textbox(r)), "all_lines": lines, "icons": icons,
-                          "page_h": page.rect.height})
+                          "page_h": page.rect.height, "xrefs": [lk.get("xref")]})
     links.sort(key=lambda d: (d["page"], round(d["y"]), d["x"]))
     merged = []
     for lk in links:
@@ -208,6 +256,8 @@ def collect_links(doc, include_nav):
                 m["lines"] += [l for l in lk["lines"] if (l["y0"], l["x0"]) not in known]
                 m["y1"] = max(m["y1"], lk["y1"])
                 m["x1"] = max(m["x1"], lk["x1"])
+                m["x"] = min(m["x"], lk["x"])
+                m["xrefs"] = m["xrefs"] + lk["xrefs"]
                 break
         else:
             merged.append(dict(lk))
@@ -290,6 +340,7 @@ def main():
 
     events = build_events(doc)
     found = collect_links(doc, args.include_nav)
+    alts_by_annot = figure_alts(doc)
     entries = []
     for lk in found:
         section, label = context_at(events, lk["page"], lk["y1"] - 1)
@@ -303,9 +354,12 @@ def main():
             if labelled:
                 sub = new_sub or sub
         elif generic:
+            alts = list(dict.fromkeys(a for x in lk["xrefs"] for a in alts_by_annot.get(x, [])))
+            inside = text_inside(lk)
             target = lk["url"].partition("#")[2]
-            detail = (f"ปุ่มรูปภาพ → ส่วน “{target}” (หน้า {lk['page']})" if target
-                      else f"ปุ่มรูปภาพไม่มีข้อความ (หน้า {lk['page']})")
+            name = " ".join(alts) or target
+            detail = f"{name} – {inside}" if name and inside else (name or inside or f"ลิงก์รูปภาพ (หน้า {lk['page']})")
+            labelled = True    # image buttons sit in grids too; read them left to right
         entries.append({"lk": lk, "labelled": labelled,
                         "row": {"sub_header": sub, "detail": detail, "url": lk["url"], "page": lk["page"]}})
 
