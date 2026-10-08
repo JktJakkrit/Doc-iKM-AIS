@@ -35,17 +35,20 @@ input {
 .app {
   display: flex;
   width: 100%;
-  min-height: 100vh;
+  height: 100vh;
+  height: 100dvh;
   flex-direction: column;
   margin: 0;
-  padding: clamp(24px, 4vw, 56px);
+  padding: clamp(16px, 2.5vw, 40px);
 }
 
+/* The page itself never scrolls: only the table does. */
 .app-header {
   display: flex;
+  flex: 0 0 auto;
   align-items: flex-start;
   gap: 22px;
-  margin-bottom: 34px;
+  margin-bottom: 18px;
 }
 
 .brand-mark {
@@ -78,9 +81,9 @@ p {
 }
 
 h1 {
-  margin-bottom: 10px;
+  margin-bottom: 8px;
   font-family: Georgia, "Times New Roman", serif;
-  font-size: clamp(2.4rem, 5vw, 4rem);
+  font-size: clamp(1.8rem, 2.8vw, 2.8rem);
   font-weight: 500;
   letter-spacing: -0.045em;
   line-height: 1.02;
@@ -96,9 +99,10 @@ h1 {
 
 .workspace {
   display: flex;
+  min-height: 0;
   flex: 1;
   flex-direction: column;
-  gap: 22px;
+  gap: 16px;
 }
 
 .work-column,
@@ -112,8 +116,9 @@ h1 {
 
 .work-column {
   display: flex;
+  flex: 0 0 auto;
   flex-direction: column;
-  padding: 20px;
+  padding: 16px 20px;
 }
 
 /* Expansion panel: the header always shows; the body (drop zone + file list) folds away. */
@@ -176,18 +181,40 @@ h1 {
 }
 
 .panel-inner {
+  display: grid;
   min-height: 0;
+  grid-template-columns: minmax(260px, 380px) minmax(0, 1fr);
+  gap: 14px;
   overflow: hidden;
 }
 
+.panel-inner .file-list {
+  align-content: start;
+  margin-top: 0;
+}
+
+@media (max-width: 860px) {
+  .panel-inner {
+    grid-template-columns: 1fr;
+  }
+
+  .panel-inner .file-list {
+    margin-top: 0;
+  }
+}
+
 .preview {
+  display: flex;
+  /* If the window is too short for everything, the page scrolls as a last resort instead of clipping the table. */
+  min-height: 16rem;
   flex: 1;
+  flex-direction: column;
 }
 
 .drop-zone {
   position: relative;
   display: flex;
-  min-height: 250px;
+  min-height: clamp(130px, 18vh, 220px);
   flex-direction: column;
   align-items: center;
   justify-content: center;
@@ -255,8 +282,6 @@ h1 {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 8px;
-  max-height: 220px;
-  overflow: auto;
   margin-top: 14px;
 }
 
@@ -352,6 +377,7 @@ h1 {
 .primary-button {
   flex: 0 1 280px;
   padding: 0 22px;
+  border-radius: 12px;
   background: linear-gradient(130deg, #e9c486, var(--accent));
   color: var(--accent-ink);
   box-shadow: 0 10px 24px rgba(227, 178, 103, 0.14);
@@ -390,16 +416,17 @@ h1 {
 
 .preview-heading {
   display: flex;
+  flex: 0 0 auto;
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
-  padding: 23px 24px 18px;
+  padding: 16px 24px 12px;
 }
 
 .preview-heading h2 {
   margin: 0;
   font-family: Georgia, "Times New Roman", serif;
-  font-size: 1.8rem;
+  font-size: 1.5rem;
   font-weight: 500;
   letter-spacing: -0.035em;
 }
@@ -419,10 +446,58 @@ h1 {
 
 .summary {
   display: flex;
-  gap: 20px;
-  padding: 0 24px 18px;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 20px;
+  padding: 0 24px 12px;
   color: var(--muted);
   font-size: 0.82rem;
+}
+
+.preview-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+}
+
+.preview-tools input[type="search"] {
+  width: clamp(150px, 22vw, 300px);
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.85rem;
+}
+
+.preview-tools input[type="search"]:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.filter-count {
+  color: var(--accent);
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.tool-button {
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.tool-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
 }
 
 .summary strong {
@@ -432,6 +507,7 @@ h1 {
 
 .sheet-tabs {
   display: flex;
+  flex: 0 0 auto;
   flex-wrap: wrap;
   gap: 6px;
   padding: 0 24px 12px;
@@ -484,7 +560,8 @@ h1 {
 }
 
 .table-wrap {
-  max-height: min(72vh, 900px);
+  min-height: 12rem;
+  flex: 1;
   overflow: auto;
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
@@ -506,8 +583,11 @@ td {
   vertical-align: top;
 }
 
+th:first-child {
+  text-align: right;
+}
+
 th {
-  position: sticky;
   z-index: 1;
   top: 0;
   background: #202a2d;
@@ -516,15 +596,25 @@ th {
   letter-spacing: 0.035em;
 }
 
-th:nth-child(1) { width: 15%; }
-th:nth-child(2) { width: 19%; }
-th:nth-child(3) { width: 27%; }
-th:nth-child(4) { width: 14%; }
-th:nth-child(5) { width: 25%; }
+th:nth-child(1) { width: 5%; }
+th:nth-child(2) { width: 14%; }
+th:nth-child(3) { width: 18%; }
+th:nth-child(4) { width: 28%; }
+th:nth-child(5) { width: 13%; }
+th:nth-child(6) { width: 22%; }
 
 td {
   color: #cad4cf;
   line-height: 1.45;
+}
+
+/* Web-only row counter; it is not part of the Excel output. */
+td.row-number {
+  padding-right: 6px;
+  color: #6f7c76;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  user-select: none;
 }
 
 td a {
@@ -616,16 +706,58 @@ tr.drop-target td {
 }
 
 .column-note {
-  margin: 0;
-  padding: 16px 24px 20px;
+  flex: 0 0 auto;
+  padding: 10px 24px;
   color: #8fa099;
   font-size: 0.77rem;
   line-height: 1.55;
 }
 
-@media (max-width: 860px) {
+.column-note summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+
+.column-note summary:hover {
+  color: var(--text);
+}
+
+.column-note p {
+  margin: 8px 0 4px;
+}
+
+/* Short windows: slim the upload area so the table keeps its room. */
+@media (max-height: 820px) {
+  .intro {
+    display: none;
+  }
+
+  .app-header {
+    margin-bottom: 10px;
+  }
+
   .drop-zone {
-    min-height: 210px;
+    min-height: 88px;
+    flex-direction: row;
+    gap: 14px;
+  }
+
+  .drop-zone small,
+  .drop-zone > span:not(.upload-icon) {
+    display: none;
+  }
+
+  .file-list,
+  .progress {
+    margin-top: 8px;
+  }
+
+  .button-row {
+    margin-top: 10px;
+  }
+
+  .notice {
+    margin-top: 8px;
   }
 }
 

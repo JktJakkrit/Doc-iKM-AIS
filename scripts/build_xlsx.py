@@ -99,6 +99,16 @@ def link_cell(cell, url):
     cell.font = Font(color="0563C1", underline="single")
 
 
+FORMULA_START = ("=", "+", "-", "@")
+
+
+def safe_text(text):
+    """Excel reads a cell that starts with = + - @ as a formula (when pasted or typed). A leading space keeps it text."""
+    if text and text.startswith(FORMULA_START):
+        return " " + text
+    return text
+
+
 def row_key(header, sub, detail, url):
     return (squash(header or ""), squash(sub or ""), squash(detail or ""), url)
 
@@ -186,17 +196,16 @@ def write(pages, args):
         first = True
         for r in rows:
             key = row_key(page["header"], r["sub_header"], r["detail"], r["url"])
-            if key in seen:
+            if key in seen:      # only rows that were already in the workbook (--append); never rows of this run
                 skipped += 1
                 continue
-            seen.add(key)
             show_header = args.fill_down or first
             show_sub = args.fill_down or r["sub_header"] != last_sub or first
             link_val = r["url"] if args.link_mode == "url" else args.link_label
             ws.append([
-                page["header"] if show_header else None,
-                r["sub_header"] if show_sub else None,
-                r["detail"],
+                safe_text(page["header"]) if show_header else None,
+                safe_text(r["sub_header"]) if show_sub else None,
+                safe_text(r["detail"]),
                 link_val,
             ])
             row_idx = ws.max_row
