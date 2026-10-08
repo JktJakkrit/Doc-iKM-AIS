@@ -385,6 +385,10 @@ td a:hover {
   outline: none;
 }
 
+.repeat-cell {
+  color: #6f7c76;
+}
+
 .placeholder-row td {
   padding: 30px 18px;
   color: #87958f;

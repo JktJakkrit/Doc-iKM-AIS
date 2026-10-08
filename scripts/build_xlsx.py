@@ -112,10 +112,8 @@ def existing_keys(ws):
         if b:
             sub = b
         url = ""
-        for cell in row[2:4]:
-            if cell.hyperlink and cell.hyperlink.target:
-                url = cell.hyperlink.target
-                break
+        if row[3].hyperlink and row[3].hyperlink.target:
+            url = row[3].hyperlink.target
         if url:
             seen.add(row_key(header, sub, c, url))
     return seen
@@ -168,7 +166,6 @@ def write(pages, args):
                 link_val,
             ])
             row_idx = ws.max_row
-            link_cell(ws.cell(row_idx, 3), r["url"])
             link_cell(ws.cell(row_idx, 4), r["url"])
             for c in ws[row_idx]:
                 c.alignment = Alignment(wrap_text=True, vertical="top")

@@ -152,12 +152,15 @@ const renderPreview = () => {
       );
     } else {
       const header = document.createElement('td');
-      header.textContent = data.header === lastHeader ? '' : data.header;
+      header.textContent = data.header;
+      if (data.header === lastHeader) header.className = 'repeat-cell';
       const subHeader = document.createElement('td');
-      subHeader.textContent = data.subHeader === lastSubHeader ? '' : data.subHeader;
+      subHeader.textContent = data.subHeader;
+      if (data.subHeader === lastSubHeader) subHeader.className = 'repeat-cell';
       const link = document.createElement('td');
       const anchor = document.createElement('a');
-      anchor.textContent = 'URL';
+      anchor.textContent = 'เปิดลิงก์ ↗';
+      anchor.title = data.url;
       anchor.href = data.url;
       anchor.target = '_blank';
       anchor.rel = 'noopener noreferrer';

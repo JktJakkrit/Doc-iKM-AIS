@@ -15,7 +15,9 @@ How the columns are guessed (always review the preview before building the workb
   sub header "section > problem label": the last bold line in the left margin is the section,
              the last left-column cell above the link is the problem label (title lines only,
              up to the first "- bullet" line). Labels carry across page breaks.
-  Detail     the text line(s) the link sits on
+  Detail     the text line(s) the link sits on. For a bare "คลิก" / image button, the date or "Week N" label
+             above it plus the card text just above the button (sub header = the month heading); an icon
+             with no text at all is described by the target it points to.
 Internal navigation links ("กลับเมนูด้านบน", #Home, top menu #P1..#P9) are skipped unless --include-nav.
 """
 import argparse
@@ -38,6 +40,17 @@ NAV_FRAGMENT = re.compile(r"#(Home|P\d+)$")
 NUMBERED = re.compile(r"^\W*\d+\s*\.")
 BULLET = re.compile(r"^\s*[-–•+]")
 COLUMN_TITLES = {"ปัญหาที่พบ", "แนวทางแก้ไข"}
+GENERIC = re.compile(r"^(คลิก(ที่นี่|ดู)?|click( here)?|here|url)$", re.I)
+THAI_MONTHS = "มกราคม|กุมภาพันธ์|มีนาคม|เมษายน|พฤษภาคม|มิถุนายน|กรกฎาคม|สิงหาคม|กันยายน|ตุลาคม|พฤศจิกายน|ธันวาคม"
+DATE_LABEL = re.compile(rf"^\d{{1,2}}(\s*-\s*\d{{1,2}})?\s+({THAI_MONTHS})")
+WEEK_LABEL = re.compile(r"^Week\s*\d+$", re.I)
+MONTH_HEADER = re.compile(r"^เดือน\s")
+SKIP_TEXT = {"หรือ", "or"}
+COLUMN_HALF = 75         # a line belongs to a link's column when its centre is within this many pt of the link's
+COLUMN_TEXT_MAX_W = 260  # wider lines are paragraphs, not card / cell text
+LABEL_MAX_DY = 400       # how far above a link its date / "Week N" label may sit
+NEAR_TEXT_DY = 60        # without a label, only text this close above the link describes it
+GRID_ROW_GAP = 14        # labelled links whose y differs by less than this (chained) are one grid row
 
 
 MARKS = "\u0e31\u0e34-\u0e3a\u0e47-\u0e4e"   # Thai vowel/tone marks that sit above or below a letter
@@ -183,8 +196,9 @@ def collect_links(doc, include_nav):
                 continue
             mid = (r.y0 + r.y1) / 2
             on_line = [l for l in lines if l["y0"] - 2 <= mid <= l["y1"] + 2 and l["x0"] - 2 <= r.x1 and l["x1"] + 2 >= r.x0]
-            links.append({"page": pno, "y": r.y0, "y1": r.y1, "x": r.x0, "url": uri, "lines": on_line,
-                          "fallback": squash(page.get_textbox(r)), "all_lines": lines, "icons": icons})
+            links.append({"page": pno, "y": r.y0, "y1": r.y1, "x": r.x0, "x1": r.x1, "url": uri, "lines": on_line,
+                          "fallback": squash(page.get_textbox(r)), "all_lines": lines, "icons": icons,
+                          "page_h": page.rect.height})
     links.sort(key=lambda d: (d["page"], round(d["y"]), d["x"]))
     merged = []
     for lk in links:
@@ -193,12 +207,60 @@ def collect_links(doc, include_nav):
                 known = {(l["y0"], l["x0"]) for l in m["lines"]}
                 m["lines"] += [l for l in lk["lines"] if (l["y0"], l["x0"]) not in known]
                 m["y1"] = max(m["y1"], lk["y1"])
+                m["x1"] = max(m["x1"], lk["x1"])
                 break
         else:
             merged.append(dict(lk))
     for m in merged:
         m["text"] = with_lead_in(m["lines"], m["all_lines"], m["icons"]) or m["fallback"]
     return merged
+
+
+def is_generic(text):
+    """True when the link text says nothing about the target (empty, "คลิก", "Click")."""
+    return not text or bool(GENERIC.match(re.sub(r"[\s\-_.:!?,\"'()\[\]]+", " ", text).strip()))
+
+
+def column_lines(lk):
+    """Short text lines of the page that sit in the same visual column as the link (card / table cell)."""
+    cx = (lk["x"] + lk["x1"]) / 2
+    return [l for l in lk["all_lines"]
+            if TOP_MARGIN < l["y0"] and l["y1"] < lk["page_h"] - BOTTOM_MARGIN
+            and l["x1"] - l["x0"] <= COLUMN_TEXT_MAX_W and abs((l["x0"] + l["x1"]) / 2 - cx) <= COLUMN_HALF]
+
+
+def describe_image_link(lk, page_links):
+    """Readable (sub_header, detail) for a link that has no text of its own, e.g. a "คลิก" button under a card.
+
+    Card / table layouts put a date or "Week N" label above the picture and the card text just above the
+    button, so the label plus the text between the label (or the previous button) and this button describe it.
+    Returns None when nothing useful is found nearby.
+    """
+    cx = (lk["x"] + lk["x1"]) / 2
+    col = column_lines(lk)
+    above = [l for l in col if l["y1"] <= lk["y"] + 2]
+    labels = [l for l in above if (DATE_LABEL.match(l["text"]) or WEEK_LABEL.match(l["text"]))
+              and lk["y"] - l["y1"] <= LABEL_MAX_DY]
+    label = max(labels, key=lambda l: l["y1"]) if labels else None
+    prev_ends = [o["y1"] for o in page_links if o is not lk and o["y"] < lk["y"] - 5
+                 and abs((o["x"] + o["x1"]) / 2 - cx) <= COLUMN_HALF]
+    floor = max([label["y1"] if label else lk["y"] - NEAR_TEXT_DY] + prev_ends)
+    parts = [l["text"] for l in above
+             if l["y0"] >= floor - 1 and l is not label
+             and not is_generic(l["text"]) and l["text"] not in SKIP_TEXT
+             and not (DATE_LABEL.match(l["text"]) or WEEK_LABEL.match(l["text"]) or MONTH_HEADER.match(l["text"]))]
+    text = re.sub(r"\s+(หรือ|or)$", "", " ".join(parts))
+    if not label:
+        return ("", text, False) if text else None
+
+    month = next((l["text"] for l in sorted(lk["all_lines"], key=lambda l: -l["y0"])
+                  if MONTH_HEADER.match(l["text"]) and l["y1"] <= label["y0"] + 2), "")
+    year = re.search(r"\d{4}", month)
+    name = label["text"]
+    if year and DATE_LABEL.match(name):
+        name = f"{name} {year.group()}"
+    sub = month or ("Week 1-12" if WEEK_LABEL.match(name) else "")
+    return sub, (f"{name} – {text}" if text else name), True
 
 
 def page_title(doc):
@@ -227,11 +289,36 @@ def main():
         sys.exit(2)
 
     events = build_events(doc)
-    rows = []
-    for lk in collect_links(doc, args.include_nav):
+    found = collect_links(doc, args.include_nav)
+    entries = []
+    for lk in found:
         section, label = context_at(events, lk["page"], lk["y1"] - 1)
         sub = " > ".join(x for x in (section, label) if x)
-        rows.append({"sub_header": sub, "detail": lk["text"], "url": lk["url"], "page": lk["page"]})
+        detail = lk["text"]
+        generic = is_generic(detail)
+        labelled = False
+        described = describe_image_link(lk, [o for o in found if o["page"] == lk["page"]])
+        if described and (described[2] or generic):
+            new_sub, detail, labelled = described
+            if labelled:
+                sub = new_sub or sub
+        elif generic:
+            target = lk["url"].partition("#")[2]
+            detail = (f"ปุ่มรูปภาพ → ส่วน “{target}” (หน้า {lk['page']})" if target
+                      else f"ปุ่มรูปภาพไม่มีข้อความ (หน้า {lk['page']})")
+        entries.append({"lk": lk, "labelled": labelled,
+                        "row": {"sub_header": sub, "detail": detail, "url": lk["url"], "page": lk["page"]}})
+
+    # Cards / table cells on one visual row sit at slightly different y; read them left to right.
+    row_y, last = {}, None
+    for e in sorted((e for e in entries if e["labelled"]), key=lambda e: (e["lk"]["page"], e["lk"]["y"])):
+        lk = e["lk"]
+        if last is None or lk["page"] != last["page"] or lk["y"] - last["y"] > GRID_ROW_GAP:
+            start = lk["y"]
+        row_y[id(e)] = start
+        last = lk
+    entries.sort(key=lambda e: (e["lk"]["page"], row_y.get(id(e), round(e["lk"]["y"])), e["lk"]["x"]))
+    rows = [e["row"] for e in entries]
 
     result = [{"header": args.header or page_title(doc), "rows": rows}]
     with open(args.out, "w", encoding="utf-8") as f:
