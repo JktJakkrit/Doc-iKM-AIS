@@ -49,7 +49,7 @@
                 <span class="upload-icon" aria-hidden="true">↑</span>
                 <strong>Drop PDF files here</strong>
                 <span id="dropHelp">or browse to select one or more PDFs</span>
-                <small>Browser-saved PDFs preserve their clickable URLs</small>
+                <small>Browser-saved PDFs keep their clickable URLs · new files are added to the list</small>
               </div>
 
               <div class="file-list" id="fileList" aria-live="polite">
@@ -90,6 +90,12 @@
           <div class="summary" aria-live="polite">
             <span><strong id="pageCount">0</strong> pages</span>
             <span><strong id="rowCount">0</strong> link rows</span>
+            <div class="preview-tools">
+              <input id="rowFilter" type="search" placeholder="Search rows…" aria-label="Search rows in this table" spellcheck="false" />
+              <span class="filter-count" id="filterCount" hidden></span>
+              <button class="text-button tool-button" id="copyButton" type="button" title="Copy this sheet's rows as they will appear in Excel (no header row, all rows, ignoring the search)" disabled>⧉ Copy table</button>
+              <button class="text-button tool-button" id="undoButton" type="button" title="Undo the last row change (Ctrl+Z)" disabled>↶ Undo</button>
+            </div>
           </div>
 
           <div class="sheet-tabs" id="sheetTabs" role="tablist" aria-label="PDF files (one Excel sheet each)" hidden></div>
@@ -98,6 +104,7 @@
             <table>
               <thead>
                 <tr>
+                  <th title="Row number in the Excel sheet (row 1 is the header). Web only, not exported.">#</th>
                   <th>Header</th>
                   <th>sub header</th>
                   <th>Detail</th>
@@ -107,15 +114,18 @@
               </thead>
               <tbody id="previewRows">
                 <tr class="placeholder-row">
-                  <td colspan="5">Your linked rows will appear here after the PDFs are read.</td>
+                  <td colspan="6">Your linked rows will appear here after the PDFs are read.</td>
                 </tr>
               </tbody>
             </table>
           </div>
 
-          <p class="column-note">
-            The export keeps all 9 sample columns. With several PDFs, pick a tab to view or edit one PDF; export combines all PDFs into one workbook with one sheet each. Grey Header / sub header text repeats the row above (the Excel file shows it once per group). Only the Link column carries the hyperlink: it shows “URL” in Excel, and “เปิดลิงก์ ↗” in the preview. Detail is plain text. You can edit Detail on every row and Header / sub header on the first row of each group (the grey repeated cells follow it and are read-only; the Link of extracted rows stays the original URL), insert rows above or below (+↑ / +↓), reorder rows by dragging ⠿, and delete rows (✕) in the preview before exporting. Rows you add need a full http(s) URL.
-          </p>
+          <details class="column-note">
+            <summary>How this table works</summary>
+            <p>
+              The export keeps all 9 sample columns. With several PDFs, pick a tab to view or edit one PDF; export combines all PDFs into one workbook with one sheet each. Grey Header / sub header text repeats the row above (the Excel file shows it once per group). Only the Link column carries the hyperlink: it shows “URL” in Excel, and “เปิดลิงก์ ↗” in the preview. Detail is plain text. You can edit Detail on every row and Header / sub header on the first row of each group (the grey repeated cells follow it and are read-only; the Link of extracted rows stays the original URL), insert rows above or below (+↑ / +↓), reorder rows by dragging ⠿, and delete rows (✕) in the preview before exporting. Rows you add need a full http(s) URL.
+            </p>
+          </details>
         </aside>
       </section>
     </main>

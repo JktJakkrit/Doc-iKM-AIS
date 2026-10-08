@@ -22,6 +22,10 @@ uploadToggle.addEventListener('click', () => {
   setUploadExpanded(uploadToggle.getAttribute('aria-expanded') !== 'true');
 });
 const sheetTabs = document.getElementById('sheetTabs');
+const rowFilter = document.getElementById('rowFilter');
+const filterCount = document.getElementById('filterCount');
+const undoButton = document.getElementById('undoButton');
+const copyButton = document.getElementById('copyButton');
 let activeSheet = '';
 const progress = document.getElementById('progress');
 const progressLabel = document.getElementById('progressLabel');
@@ -36,6 +40,11 @@ let draggedRowId = null;
 let activeRequest = null;
 let progressTimer = null;
 let progressValue = 0;
+let loadedFiles = [];     // every PDF read so far: { name, pages, rows, error }
+let busy = false;          // a PDF batch is being uploaded / read
+let filterText = '';
+const undoStack = [];      // structural edits (delete / insert / move), undone last-in first-out
+const UNDO_LIMIT = 100;
 
 const UPLOAD_SHARE = 30;   // % of the bar covered by the real upload
 const PROCESS_CAP = 95;    // the server gives no progress, so processing creeps toward this and finishes on reply
@@ -91,9 +100,9 @@ const setNotice = (message, isError = false) => {
   notice.classList.toggle('error', isError);
 };
 
-const renderFileList = (files, result) => {
+const renderFileList = (pending = []) => {
   fileList.replaceChildren();
-  if (!files.length) {
+  if (!loadedFiles.length && !pending.length) {
     const empty = document.createElement('p');
     empty.className = 'empty-files';
     empty.textContent = 'No files selected';
@@ -101,27 +110,36 @@ const renderFileList = (files, result) => {
     return;
   }
 
-  files.forEach((file, index) => {
+  const addItem = (fileName, text, isError = false) => {
     const item = document.createElement('div');
     item.className = 'file-item';
     const name = document.createElement('span');
     name.className = 'file-name';
-    name.textContent = file.name;
+    name.textContent = fileName;
     const details = document.createElement('span');
     details.className = 'file-count';
-
-    if (result?.files?.[index]) {
-      const summary = result.files[index];
-      details.textContent = summary.error
-        ? `Error: ${summary.error}`
-        : `${summary.pages} pages · ${summary.rows} links`;
-      if (summary.error) details.classList.add('error-text');
-    } else {
-      details.textContent = 'Ready to process';
-    }
+    details.textContent = text;
+    if (isError) details.classList.add('error-text');
     item.append(name, details);
     fileList.append(item);
-  });
+  };
+
+  loadedFiles.forEach((file) =>
+    file.error
+      ? addItem(file.name, `Error: ${file.error}`, true)
+      : addItem(file.name, `${file.pages} pages · ${file.rows} links`),
+  );
+  pending.forEach((file) => addItem(file.name, 'Reading…'));
+};
+
+const refreshUploadSummary = () => {
+  if (!loadedFiles.length) {
+    uploadSummary.textContent = 'No files selected';
+    return;
+  }
+  const pages = loadedFiles.reduce((sum, file) => sum + (file.pages || 0), 0);
+  uploadSummary.textContent = `${loadedFiles.length} PDF${loadedFiles.length > 1 ? 's' : ''} · ${pages} pages · ${rows.length} links`;
+  pageCount.textContent = String(pages);
 };
 
 const ROW_ACTIONS = [
@@ -154,7 +172,14 @@ const isHttpUrl = (value) => {
 const updateSummary = () => {
   rowCount.textContent = String(rows.length);
   generateButton.disabled = rows.length === 0;
+  undoButton.disabled = undoStack.length === 0;
+  copyButton.disabled = !rows.some((data) => data.sheet === activeSheet);
 };
+
+const matchesFilter = (data) =>
+  !filterText ||
+  data.custom ||    // rows the user just added stay visible even while their fields are still empty
+  `${data.header} ${data.subHeader} ${data.detail} ${data.url}`.toLowerCase().includes(filterText);
 
 const insertPlainText = (text) => {
   if (document.execCommand('insertText', false, text)) return;
@@ -220,7 +245,7 @@ const actionsCell = () => {
   return cell;
 };
 
-const GROUP_COLUMNS = { header: 0, subHeader: 1 };
+const GROUP_COLUMNS = { header: 1, subHeader: 2 };    // cell index in a row (cell 0 is the row number)
 
 // Header / sub header: the first row of a group is editable and its edits flow to the repeated rows below;
 // repeated (grey) cells are read-only.
@@ -274,10 +299,11 @@ const renderPreview = () => {
   previewRows.replaceChildren();
   renderSheetTabs();
   if (!rows.length) {
+    filterCount.hidden = true;
     const row = document.createElement('tr');
     row.className = 'placeholder-row';
     const cell = document.createElement('td');
-    cell.colSpan = 5;
+    cell.colSpan = 6;
     cell.textContent = 'No rows yet. Read a PDF to extract its links.';
     row.append(cell);
     previewRows.append(row);
@@ -285,13 +311,32 @@ const renderPreview = () => {
   }
 
   // With several PDFs only the selected one is listed; export still writes every one, one sheet each.
-  const visibleRows = rows.filter((data) => data.sheet === activeSheet);
+  const sheetRows = rows.filter((data) => data.sheet === activeSheet);
+  const visibleRows = sheetRows.filter(matchesFilter);
+  filterCount.hidden = !filterText;
+  filterCount.textContent = `${visibleRows.length} of ${sheetRows.length}`;
+  if (!visibleRows.length) {
+    const row = document.createElement('tr');
+    row.className = 'placeholder-row';
+    const cell = document.createElement('td');
+    cell.colSpan = 6;
+    cell.textContent = `No rows match “${rowFilter.value.trim()}”.`;
+    row.append(cell);
+    previewRows.append(row);
+    return;
+  }
   let lastHeader = '';
   let lastSubHeader = '';
+  // Numbers match the Excel row: the header row is 1, so the first data row is 2. Search never renumbers them.
+  const positions = new Map(sheetRows.map((data, index) => [data.id, index + 2]));
   visibleRows.forEach((data) => {
     const row = document.createElement('tr');
     row.dataset.rowId = String(data.id);
-
+    const number = document.createElement('td');
+    number.className = 'row-number';
+    number.textContent = String(positions.get(data.id));
+    number.title = `Row ${positions.get(data.id)} in this sheet of the Excel file (row 1 is the header)`;
+    row.append(number);
     if (data.custom) {
       row.classList.add('custom-row');
       row.append(
@@ -332,6 +377,7 @@ const refreshRows = () => {
 
 const setRows = (nextRows) => {
   rows = nextRows.map((data) => createRow(data));
+  undoStack.length = 0;
   activeSheet = rows[0]?.sheet ?? '';
   refreshRows();
 };
@@ -345,10 +391,16 @@ sheetTabs.addEventListener('click', (event) => {
 
 const rowIndexOf = (id) => rows.findIndex((row) => row.id === Number(id));
 
+const pushUndo = (entry) => {
+  undoStack.push(entry);
+  if (undoStack.length > UNDO_LIMIT) undoStack.shift();
+};
+
 const moveRow = (from, to) => {
   if (from < 0 || to < 0 || to >= rows.length || from === to) return;
   const [moved] = rows.splice(from, 1);
   rows.splice(to, 0, moved);
+  pushUndo({ type: 'move', from, to });
   refreshRows();
 };
 
@@ -360,14 +412,142 @@ const insertRowAt = (position, inheritFrom) => {
     sheet: inheritFrom?.sheet ?? '',
   });
   rows.splice(position, 0, row);
+  pushUndo({ type: 'insert', id: row.id });
   refreshRows();
-  previewRows.querySelector(`[data-row-id="${row.id}"] .editable-cell:nth-child(3)`)?.focus();
+  previewRows.querySelector(`[data-row-id="${row.id}"] .editable-cell:nth-child(4)`)?.focus();
 };
 
 const deleteRow = (index) => {
-  rows.splice(index, 1);
+  const [removed] = rows.splice(index, 1);
+  pushUndo({ type: 'delete', row: removed, index });
   refreshRows();
 };
+
+// Undo steps run last-in first-out, so the row positions recorded in each step still match the table.
+const undo = () => {
+  const step = undoStack.pop();
+  if (!step) return;
+  if (step.type === 'delete') {
+    rows.splice(step.index, 0, step.row);
+    activeSheet = step.row.sheet;
+  } else if (step.type === 'insert') {
+    const at = rowIndexOf(step.id);
+    if (at >= 0) rows.splice(at, 1);
+  } else if (step.type === 'move') {
+    const [moved] = rows.splice(step.to, 1);
+    rows.splice(step.from, 0, moved);
+    activeSheet = moved.sheet;
+  }
+  refreshRows();
+  setNotice('Undid the last change.');
+};
+
+undoButton.addEventListener('click', undo);
+document.addEventListener('keydown', (event) => {
+  if (!(event.ctrlKey || event.metaKey) || event.shiftKey || event.key.toLowerCase() !== 'z') return;
+  if (event.target.closest?.('[contenteditable="true"], input, textarea')) return;   // keep native text undo while typing
+  event.preventDefault();
+  undo();
+});
+
+rowFilter.addEventListener('input', () => {
+  filterText = rowFilter.value.trim().toLowerCase();
+  renderPreview();
+});
+
+// ---- Copy the open sheet exactly as the Excel export lays it out -------------------------------------------
+const LINK_LABEL = 'URL';
+
+// Same rule as build_xlsx.py: Excel treats a cell starting with = + - @ as a formula, so a space goes in front.
+const excelSafe = (text) => (/^[=+\-@]/.test(text) ? ` ${text}` : text);
+
+// Mirrors build_xlsx.py: only rows with a URL; Header only on the first row of a group (a run with the same
+// Header), sub header only when it changes; Link shows "URL" and carries the hyperlink; the last 4 columns are blank.
+const excelRowsForSheet = (sheet) => {
+  const out = [];
+  let previousHeader = null;
+  let lastSub = null;
+  rows
+    .filter((data) => data.sheet === sheet && data.url.trim())
+    .forEach((data) => {
+      const header = data.header.trim();
+      const sub = data.subHeader.trim();
+      const firstOfGroup = previousHeader === null || header !== previousHeader;
+      if (firstOfGroup) lastSub = null;
+      out.push({
+        header: excelSafe(firstOfGroup ? header : ''),
+        subHeader: excelSafe(firstOfGroup || sub !== lastSub ? sub : ''),
+        detail: excelSafe(data.detail.trim()),
+        url: data.url.trim(),
+      });
+      previousHeader = header;
+      lastSub = sub;
+    });
+  return out;
+};
+
+const escapeHtml = (text) =>
+  text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+const oneLine = (text) => text.replace(/\s*[\r\n\t]+\s*/g, ' ');
+
+const sheetClipboard = (sheet) => {
+  const data = excelRowsForSheet(sheet);
+  const body = data
+    .map(
+      (r) =>
+        `<tr><td>${escapeHtml(r.header)}</td><td>${escapeHtml(r.subHeader)}</td><td>${escapeHtml(r.detail)}</td>` +
+        `<td><a href="${escapeHtml(r.url)}">${LINK_LABEL}</a></td><td></td><td></td><td></td><td></td><td></td></tr>`,
+    )
+    .join('');
+  const html = `<meta charset="utf-8"><table><tbody>${body}</tbody></table>`;
+  // Plain text (for editors that ignore HTML): tab-separated, with the real URL in the Link column.
+  const text = data
+    .map((r) => [r.header, r.subHeader, r.detail, r.url, '', '', '', '', ''].map(oneLine).join('\t'))
+    .join('\n');
+  return { html, text, count: data.length };
+};
+
+const copyWithSelection = (html) => {
+  const holder = document.createElement('div');
+  holder.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0;';
+  holder.innerHTML = html;
+  document.body.append(holder);
+  const range = document.createRange();
+  range.selectNodeContents(holder);
+  const selection = window.getSelection();
+  selection.removeAllRanges();
+  selection.addRange(range);
+  const ok = document.execCommand('copy');
+  selection.removeAllRanges();
+  holder.remove();
+  return ok;
+};
+
+copyButton.addEventListener('click', async () => {
+  const { html, text, count } = sheetClipboard(activeSheet);
+  if (!count) return;
+  let copied = false;
+  try {
+    await navigator.clipboard.write([
+      new ClipboardItem({
+        'text/html': new Blob([html], { type: 'text/html' }),
+        'text/plain': new Blob([text], { type: 'text/plain' }),
+      }),
+    ]);
+    copied = true;
+  } catch {
+    copied = copyWithSelection(html);
+  }
+  const label = copyButton.textContent;
+  if (copied) {
+    copyButton.textContent = 'Copied ✓';
+    setNotice(`Copied ${count} rows${activeSheet ? ` from “${activeSheet}”` : ''} (no header row). Paste into Excel where you want them; the first row lands in Excel row 2 if you paste at A2.`);
+  } else {
+    setNotice('The browser blocked copying. Use Export Excel instead.', true);
+  }
+  window.setTimeout(() => { copyButton.textContent = label; }, 1500);
+});
 
 previewRows.addEventListener('click', (event) => {
   const button = event.target.closest('button[data-action]');
@@ -413,41 +593,47 @@ previewRows.addEventListener('dragend', () => {
   previewRows.querySelectorAll('.dragging, .drop-target').forEach((el) => el.classList.remove('dragging', 'drop-target'));
 });
 
+const uniqueSheetName = (name, taken) => {
+  let candidate = name;
+  for (let n = 2; taken.has(candidate.toLowerCase()); n += 1) candidate = `${name} (${n})`;
+  taken.add(candidate.toLowerCase());
+  return candidate;
+};
+
+// New PDFs are added to the ones already loaded; a repeated PDF name becomes "name (2)".
 const processFiles = async (files) => {
-  const version = ++requestVersion;
   const pdfFiles = Array.from(files).filter(
     (file) => file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf'),
   );
   const skippedFiles = files.length - pdfFiles.length;
-  workbookData = null;
-  generateButton.disabled = true;
+
+  if (busy) {
+    setNotice('Still reading the previous PDFs. Add more files when it finishes.', true);
+    return;
+  }
 
   if (!pdfFiles.length) {
-    hideProgress();
-    setUploadExpanded(true);
-    uploadSummary.textContent = 'No PDF selected';
-    renderFileList([]);
-    setRows([]);
-    pageCount.textContent = '0';
-    rowCount.textContent = '0';
-    statusBadge.textContent = 'PDF required';
+    if (!loadedFiles.length) {
+      hideProgress();
+      setUploadExpanded(true);
+      uploadSummary.textContent = 'No PDF selected';
+      statusBadge.textContent = 'PDF required';
+    }
     setNotice('Choose browser-saved PDF files to extract their actual clickable links.', true);
     return;
   }
 
+  busy = true;
+  const version = ++requestVersion;
+  generateButton.disabled = true;
   renderFileList(pdfFiles);
   uploadSummary.textContent = `Reading ${pdfFiles.length} PDF${pdfFiles.length > 1 ? 's' : ''}…`;
-  setRows([]);
-  generateButton.disabled = true;
-  pageCount.textContent = '…';
-  rowCount.textContent = '…';
   statusBadge.textContent = 'Reading PDFs';
   setNotice('Reading every page and extracting the links embedded in the PDF. Please keep this page open.');
 
   const body = new FormData();
   pdfFiles.forEach((file) => body.append('files', file, file.name));
 
-  activeRequest?.abort();
   setProgress(0, 'Uploading PDF…');
 
   try {
@@ -460,32 +646,44 @@ const processFiles = async (files) => {
     if (!ok) throw new Error(result.error || `Conversion failed (${status}).`);
     stopProgressTimer();
     setProgress(100, 'Done', 'done');
-    uploadSummary.textContent = `${pdfFiles.length} PDF${pdfFiles.length > 1 ? 's' : ''} · ${result.pages} pages · ${result.rowCount} links`;
-    setUploadExpanded(false);
     window.setTimeout(() => {
       if (version === requestVersion) hideProgress();
     }, 1200);
 
-    workbookData = result;
-    renderFileList(pdfFiles, result);
-    setRows(result.rows);
-    pageCount.textContent = String(result.pages);
-    rowCount.textContent = String(result.rowCount);
-    generateButton.disabled = rows.length === 0;
+    const taken = new Set(rows.map((data) => data.sheet.toLowerCase()));
+    const renamed = new Map();
+    const added = (result.rows || []).map((data) => {
+      if (!renamed.has(data.sheet)) renamed.set(data.sheet, uniqueSheetName(data.sheet || 'PDF', taken));
+      return createRow({ ...data, sheet: renamed.get(data.sheet) });
+    });
+    rows = rows.concat(added);
+    if (added.length) activeSheet = added[0].sheet;
+    loadedFiles = loadedFiles.concat(
+      (result.files || []).map((file) => ({
+        name: file.filename,
+        pages: file.pages,
+        rows: file.rows,
+        error: file.error,
+      })),
+    );
+    renderFileList();
+    refreshRows();
+    refreshUploadSummary();
+    setUploadExpanded(false);
 
     const fileErrors = result.errors || [];
     if (fileErrors.length) {
       statusBadge.textContent = 'Some files failed';
       setNotice(
-        `${result.rowCount} link rows extracted; ${fileErrors.length} PDF(s) could not be read: ${fileErrors
+        `${added.length} link rows added; ${fileErrors.length} PDF(s) could not be read: ${fileErrors
           .map((error) => `${error.filename}: ${error.message}`)
           .join(' · ')}`,
         true,
       );
     } else if (skippedFiles) {
       statusBadge.textContent = 'Ready to export';
-      setNotice(`${result.rowCount} link rows extracted. ${skippedFiles} non-PDF file(s) were ignored.`);
-    } else if (result.rowCount === 0) {
+      setNotice(`${added.length} link rows added. ${skippedFiles} non-PDF file(s) were ignored.`);
+    } else if (!rows.length) {
       statusBadge.textContent = 'No clickable URLs';
       setNotice(
         'No external clickable links were found. Use a browser-saved PDF (Chrome/Edge → Print → Save as PDF); a visible “Click” label alone does not contain its destination.',
@@ -494,8 +692,8 @@ const processFiles = async (files) => {
     } else {
       statusBadge.textContent = 'Ready to export';
       setNotice(
-        `${result.rowCount} linked rows from ${pdfFiles.length} PDF(s) and ${result.pages} pages. Navigation links were skipped, as specified by the skill.${
-          pdfFiles.length > 1 ? ' Pick a PDF tab to view or edit it; Export Excel combines all of them into one workbook, one sheet per PDF.' : ''
+        `${added.length} linked rows added from ${pdfFiles.length} PDF(s) (${rows.length} rows in ${loadedFiles.length} PDF(s) now). Navigation links were skipped, as specified by the skill.${
+          loadedFiles.length > 1 ? ' Pick a PDF tab to view or edit it; Export Excel combines all of them into one workbook, one sheet per PDF.' : ''
         }`,
       );
     }
@@ -505,12 +703,14 @@ const processFiles = async (files) => {
     stopProgressTimer();
     setProgress(progressValue, 'Failed', 'failed');
     setUploadExpanded(true);
-    uploadSummary.textContent = 'Could not read the PDF';
-    workbookData = null;
-    pageCount.textContent = '0';
-    rowCount.textContent = '0';
+    renderFileList();
+    refreshUploadSummary();
+    if (!loadedFiles.length) uploadSummary.textContent = 'Could not read the PDF';
     statusBadge.textContent = 'Conversion failed';
     setNotice(error instanceof Error ? error.message : String(error), true);
+  } finally {
+    if (version === requestVersion) busy = false;
+    updateSummary();
   }
 };
 
@@ -553,7 +753,7 @@ const downloadWorkbook = async () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        files: (workbookData?.files ?? []).map((file) => file.filename),
+        files: loadedFiles.map((file) => file.name),
         rows: reviewedRows,
       }),
     });
@@ -584,17 +784,21 @@ const downloadWorkbook = async () => {
 };
 
 const clearFiles = () => {
+  if (rows.length && !window.confirm('Clear all files and rows? Your edits will be lost.')) return;
   requestVersion += 1;
+  busy = false;
   activeRequest?.abort();
   hideProgress();
   setUploadExpanded(true);
-  uploadSummary.textContent = 'No files selected';
   sourceInput.value = '';
-  workbookData = null;
+  loadedFiles = [];
+  rowFilter.value = '';
+  filterText = '';
   pageCount.textContent = '0';
   statusBadge.textContent = 'Waiting for PDF';
-  renderFileList([]);
+  renderFileList();
   setRows([]);
+  refreshUploadSummary();
   setNotice('Only rows with a real clickable URL are included. PDF text or a visible “Click” label alone is not a URL.');
 };
 
@@ -620,6 +824,10 @@ dropZone.addEventListener('keydown', (event) => {
   }),
 );
 dropZone.addEventListener('drop', (event) => processFiles(event.dataTransfer.files));
-sourceInput.addEventListener('change', () => processFiles(sourceInput.files));
+sourceInput.addEventListener('change', () => {
+  const picked = Array.from(sourceInput.files);
+  sourceInput.value = '';    // so choosing the same file again still fires `change`
+  processFiles(picked);
+});
 generateButton.addEventListener('click', downloadWorkbook);
 resetButton.addEventListener('click', clearFiles);
