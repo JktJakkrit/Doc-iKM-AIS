@@ -45,9 +45,13 @@ Requirements: Python with `openpyxl` and `PyMuPDF` (both in `requirements.txt`).
 
 ### Adding more PDFs later
 
-Open the **Upload PDF files** panel again (click its header) and drop more PDFs. They are **added** to the ones already loaded and nothing you edited is lost. A PDF with the same name as one already loaded becomes `name (2)`. Wait for the current read to finish before adding more. **Clear** removes everything and asks for confirmation first.
+Open the **Upload PDF files** panel again (click its header) and drop more PDFs. They are **added** to the ones already loaded and nothing you edited is lost. A PDF with the same name as one already loaded becomes `name (2)`. Wait for the current read to finish before adding more.
 
-![The Upload PDF files panel opened again, listing the PDFs already read](docs/images/03-upload-panel.png)
+### Removing one PDF
+
+In the opened **Upload PDF files** panel every PDF has a **✕** button. It removes that PDF and its rows (its tab and Excel sheet) and leaves the other PDFs untouched. If the PDF has rows, the app asks you to confirm first, because your edits to those rows are lost. The buttons are disabled while PDFs are being read. **Clear** still removes everything (it also asks for confirmation).
+
+![The Upload PDF files panel opened again: each PDF has its own ✕ button](docs/images/03-upload-panel.png)
 
 ### Several PDFs
 
