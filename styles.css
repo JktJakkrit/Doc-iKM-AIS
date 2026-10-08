@@ -224,6 +224,7 @@ h1 {
   align-items: center;
   justify-content: center;
   gap: 11px;
+  padding: 24px 28px;
   overflow: hidden;
   border: 1px dashed #53635f;
   border-radius: 18px;
@@ -271,7 +272,10 @@ h1 {
   border: 1px solid rgba(227, 178, 103, 0.32);
   border-radius: 14px;
   color: var(--accent);
-  font-size: 1.35rem;
+}
+
+.upload-icon svg {
+  display: block;
 }
 
 #sourceInput {
@@ -330,11 +334,22 @@ h1 {
   background: var(--danger);
 }
 
+/* Empty list: a faint document icon centred in the free area next to the drop zone. */
+.file-list.is-empty {
+  align-content: center;
+  justify-items: center;
+  min-height: 96px;
+}
+
 .empty-files {
-  margin: 0;
-  padding: 10px 2px;
-  color: #7f9089;
-  font-size: 0.95rem;
+  display: grid;
+  grid-column: 1 / -1;
+  place-items: center;
+  color: #4d5c57;
+}
+
+.file-list.is-empty .empty-files svg {
+  display: block;
 }
 
 .file-item {
@@ -748,6 +763,7 @@ tr.drop-target td {
     min-height: 88px;
     flex-direction: row;
     gap: 14px;
+    padding: 12px 20px;
   }
 
   .drop-zone small,

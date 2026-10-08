@@ -46,14 +46,26 @@
                 aria-describedby="dropHelp"
               >
                 <input id="sourceInput" type="file" accept=".pdf,application/pdf" multiple />
-                <span class="upload-icon" aria-hidden="true">↑</span>
+                <span class="upload-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 16V4" />
+                    <path d="M7.5 8.5 12 4l4.5 4.5" />
+                    <path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" />
+                  </svg>
+                </span>
                 <strong>Drop PDF files here</strong>
                 <span id="dropHelp">or browse to select one or more PDFs</span>
                 <small>Browser-saved PDFs keep their clickable URLs · new files are added to the list</small>
               </div>
 
-              <div class="file-list" id="fileList" aria-live="polite">
-                <p class="empty-files">No files selected</p>
+              <div class="file-list is-empty" id="fileList" aria-live="polite">
+                <span class="empty-files" role="img" aria-label="No files selected" title="No files selected">
+                  <svg viewBox="0 0 24 24" width="56" height="56" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
+                    <path d="M14 3v5h5" />
+                    <path d="M9 13h6M9 17h4" />
+                  </svg>
+                </span>
               </div>
             </div>
           </div>

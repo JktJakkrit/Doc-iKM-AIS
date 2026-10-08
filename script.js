@@ -101,10 +101,18 @@ const plural = (count, word) => `${count} ${word}${count === 1 ? '' : 's'}`;
 
 const renderFileList = (pending = []) => {
   fileList.replaceChildren();
-  if (!loadedFiles.length && !pending.length) {
-    const empty = document.createElement('p');
+  const isEmpty = !loadedFiles.length && !pending.length;
+  fileList.classList.toggle('is-empty', isEmpty);
+  if (isEmpty) {
+    // Same icon as the one in index.html: a centred document outline instead of the text "No files selected".
+    const empty = document.createElement('span');
     empty.className = 'empty-files';
-    empty.textContent = 'No files selected';
+    empty.setAttribute('role', 'img');
+    empty.setAttribute('aria-label', 'No files selected');
+    empty.title = 'No files selected';
+    empty.innerHTML =
+      '<svg viewBox="0 0 24 24" width="56" height="56" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+      '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" /><path d="M9 13h6M9 17h4" /></svg>';
     fileList.append(empty);
     return;
   }
