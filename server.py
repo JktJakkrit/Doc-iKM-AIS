@@ -214,6 +214,7 @@ class AppHandler(SimpleHTTPRequestHandler):
                 file_summaries.append(
                     {
                         "filename": filename,
+                        "sheet": sheet_name,
                         "pages": int(summary.group(1)) if summary else 0,
                         "rows": source_rows,
                         "rawLinks": int(summary.group(2)) if summary else source_rows,

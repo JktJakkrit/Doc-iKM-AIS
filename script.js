@@ -39,7 +39,7 @@ let draggedRowId = null;
 let activeRequest = null;
 let progressTimer = null;
 let progressValue = 0;
-let loadedFiles = [];     // every PDF read so far: { name, pages, rows, error }
+let loadedFiles = [];     // every PDF read so far: { name, sheet, pages, rows, error }
 let busy = false;          // a PDF batch is being uploaded / read
 let filterText = '';
 
@@ -109,9 +109,11 @@ const renderFileList = (pending = []) => {
     return;
   }
 
-  const addItem = (fileName, text, isError = false) => {
+  const addItem = (fileName, text, { isError = false, index = -1 } = {}) => {
     const item = document.createElement('div');
     item.className = 'file-item';
+    const label = document.createElement('div');
+    label.className = 'file-text';
     const name = document.createElement('span');
     name.className = 'file-name';
     name.textContent = fileName;
@@ -119,14 +121,26 @@ const renderFileList = (pending = []) => {
     details.className = 'file-count';
     details.textContent = text;
     if (isError) details.classList.add('error-text');
-    item.append(name, details);
+    label.append(name, details);
+    item.append(label);
+    if (index >= 0) {
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'file-remove';
+      remove.dataset.index = String(index);
+      remove.textContent = '✕';
+      remove.title = `Remove ${fileName} and its rows`;
+      remove.setAttribute('aria-label', `Remove ${fileName}`);
+      remove.disabled = busy;
+      item.append(remove);
+    }
     fileList.append(item);
   };
 
-  loadedFiles.forEach((file) =>
+  loadedFiles.forEach((file, index) =>
     file.error
-      ? addItem(file.name, `Error: ${file.error}`, true)
-      : addItem(file.name, `${plural(file.pages, 'page')} · ${plural(file.rows, 'link')}`),
+      ? addItem(file.name, `Error: ${file.error}`, { isError: true, index })
+      : addItem(file.name, `${plural(file.pages, 'page')} · ${plural(file.rows, 'link')}`, { index }),
   );
   pending.forEach((file) => addItem(file.name, 'Reading…'));
 };
@@ -134,6 +148,7 @@ const renderFileList = (pending = []) => {
 const refreshUploadSummary = () => {
   if (!loadedFiles.length) {
     uploadSummary.textContent = 'No files selected';
+    pageCount.textContent = '0';
     return;
   }
   const pages = loadedFiles.reduce((sum, file) => sum + (file.pages || 0), 0);
@@ -623,6 +638,8 @@ const processFiles = async (files) => {
     loadedFiles = loadedFiles.concat(
       (result.files || []).map((file) => ({
         name: file.filename,
+        // Older servers do not send `sheet`; their sheet name is the PDF's name without ".pdf".
+        sheet: renamed.get(file.sheet ?? file.filename.replace(/\.pdf$/i, '')),
         pages: file.pages,
         rows: file.rows,
         error: file.error,
@@ -671,7 +688,10 @@ const processFiles = async (files) => {
     statusBadge.textContent = 'Conversion failed';
     setNotice(error instanceof Error ? error.message : String(error), true);
   } finally {
-    if (version === requestVersion) busy = false;
+    if (version === requestVersion) {
+      busy = false;
+      renderFileList();    // re-enable the per-file remove buttons
+    }
     updateSummary();
   }
 };
@@ -763,6 +783,36 @@ const clearFiles = () => {
   refreshUploadSummary();
   setNotice('Only rows with a real clickable URL are included. PDF text or a visible “Click” label alone is not a URL.');
 };
+
+// Remove one PDF: its rows (its sheet) and its entry in the list; the other PDFs are left alone.
+const removeFile = (index) => {
+  const file = loadedFiles[index];
+  if (!file || busy) return;
+  const owned = file.sheet === undefined ? 0 : rows.filter((data) => data.sheet === file.sheet).length;
+  if (owned && !window.confirm(`Remove “${file.name}” and its ${plural(owned, 'row')}? Your edits to those rows will be lost.`)) return;
+
+  if (file.sheet !== undefined) rows = rows.filter((data) => data.sheet !== file.sheet);
+  loadedFiles.splice(index, 1);
+  renderFileList();
+  refreshRows();
+  refreshUploadSummary();
+
+  if (!loadedFiles.length) {
+    filterText = '';
+    rowFilter.value = '';
+    statusBadge.textContent = 'Waiting for PDF';
+    uploadSummary.textContent = 'No files selected';
+    setNotice('Only rows with a real clickable URL are included. PDF text or a visible “Click” label alone is not a URL.');
+    return;
+  }
+  statusBadge.textContent = rows.length ? 'Ready to export' : 'No clickable URLs';
+  setNotice(`Removed “${file.name}”${owned ? ` and its ${plural(owned, 'row')}` : ''}. ${plural(loadedFiles.length, 'PDF')} left.`);
+};
+
+fileList.addEventListener('click', (event) => {
+  const button = event.target.closest('.file-remove');
+  if (button) removeFile(Number(button.dataset.index));
+});
 
 dropZone.addEventListener('click', (event) => {
   if (event.target !== sourceInput) sourceInput.click();
