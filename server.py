@@ -17,7 +17,9 @@ from urllib.parse import unquote
 
 
 ROOT = Path(__file__).resolve().parent
-EXTRACTOR = ROOT / "scripts" / "extract_pdf_links.py"
+EXTRACTORS = {
+    ".pdf": ROOT / "scripts" / "extract_pdf_links.py",
+}
 WORKBOOK_BUILDER = ROOT / "scripts" / "build_xlsx.py"
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("PORT", "8000"))
@@ -126,7 +128,7 @@ class AppHandler(SimpleHTTPRequestHandler):
         except Exception as error:
             traceback.print_exc(file=sys.stderr)
             body = json.dumps(
-                {"error": f"PDF conversion failed: {error}"},
+                {"error": f"File conversion failed: {error}"},
                 ensure_ascii=False,
             ).encode("utf-8")
             self.send_response(500)
@@ -152,9 +154,13 @@ class AppHandler(SimpleHTTPRequestHandler):
             if part.get_content_disposition() != "form-data" or part.get_param("name", header="content-disposition") != "files":
                 continue
             filename = unquote(part.get_filename() or "document.pdf")
-            payload = part.get_payload(decode=True) or b""
-            if filename.lower().endswith(".pdf") and payload:
-                uploaded.append((Path(filename).name, payload))
+            payload = part.get_payload(decode=True)
+            if payload is None and isinstance(part.get_payload(), list):
+                payload = b"".join(item.as_bytes(policy=default) for item in part.get_payload())
+            payload = payload or b""
+            extension = Path(filename).suffix.lower()
+            if extension in EXTRACTORS and payload:
+                uploaded.append((Path(filename).name, payload, extension))
 
         if not uploaded:
             return {"error": "Select at least one non-empty PDF file."}, 400
@@ -165,15 +171,15 @@ class AppHandler(SimpleHTTPRequestHandler):
         errors = []
         with tempfile.TemporaryDirectory(prefix="ikm-pdf-excel-") as temp_dir:
             temp_path = Path(temp_dir)
-            for index, (filename, payload) in enumerate(uploaded, start=1):
-                pdf_path = temp_path / f"input-{index}.pdf"
+            for index, (filename, payload, extension) in enumerate(uploaded, start=1):
+                source_path = temp_path / f"input-{index}{extension}"
                 json_path = temp_path / f"links-{index}.json"
-                pdf_path.write_bytes(payload)
+                source_path.write_bytes(payload)
                 completed = subprocess.run(
                     [
                         sys.executable,
-                        str(EXTRACTOR),
-                        str(pdf_path),
+                        str(EXTRACTORS[extension]),
+                        str(source_path),
                         "--out",
                         str(json_path),
                     ],
@@ -189,11 +195,12 @@ class AppHandler(SimpleHTTPRequestHandler):
                     errors.append(
                         {
                             "filename": filename,
-                            "message": completed.stderr.strip() or completed.stdout.strip() or "Could not extract PDF links.",
+                            "message": completed.stderr.strip() or completed.stdout.strip() or "Could not extract file links.",
                         }
                     )
                     file_summaries.append(
-                        {"filename": filename, "pages": 0, "rows": 0, "error": errors[-1]["message"]}
+                        {"filename": filename, "format": extension[1:].upper(), "pages": 0, "rows": 0,
+                         "error": errors[-1]["message"]}
                     )
                     continue
 
@@ -202,21 +209,19 @@ class AppHandler(SimpleHTTPRequestHandler):
                 for page in extracted:
                     page["sheet"] = sheet_name
                     for row in page.get("rows", []):
-                        if row.get("page") == 1 and not row.get("sub_header"):
+                        if extension == ".pdf" and row.get("page") == 1 and not row.get("sub_header"):
                             row["sub_header"] = "เมนูหลัก (หน้าแรก)"
                             break
                     all_pages.append(page)
                 source_rows = sum(len(page.get("rows", [])) for page in extracted)
-                summary = re.search(
-                    r"from\s+(\d+)\s+pages\s+\((\d+)\s+raw links\)",
-                    completed.stdout,
-                )
+                summary = re.search(r"from\s+(\d+)\s+pages\s+\((\d+)\s+raw links\)", completed.stdout)
                 file_summaries.append(
                     {
                         "filename": filename,
+                        "format": extension[1:].upper(),
                         "pages": int(summary.group(1)) if summary else 0,
                         "rows": source_rows,
-                        "rawLinks": int(summary.group(2)) if summary else source_rows,
+                        "rawLinks": int(summary.group(2)) if extension == ".pdf" and summary else source_rows,
                     }
                 )
 
@@ -261,7 +266,7 @@ class AppHandler(SimpleHTTPRequestHandler):
             ]
             return (
                 {
-                    "filename": export_filename([name for name, _ in uploaded]),
+                    "filename": export_filename([name for name, _, _ in uploaded]),
                     "pages": total_pages,
                     "rowCount": total_rows,
                     "files": file_summaries,
@@ -339,11 +344,12 @@ class AppHandler(SimpleHTTPRequestHandler):
 
 
 def main():
-    if not EXTRACTOR.is_file() or not WORKBOOK_BUILDER.is_file():
-        raise SystemExit("The bundled iKM PDF extractor or Excel builder is missing from scripts/.")
+    if not all(path.is_file() for path in (*EXTRACTORS.values(), WORKBOOK_BUILDER)):
+        raise SystemExit("A bundled iKM file extractor or the Excel builder is missing from scripts/.")
     try:
         import openpyxl  # noqa: F401
         import pymupdf  # noqa: F401
+        import bs4  # noqa: F401
     except ImportError as error:
         raise SystemExit(f"Missing dependency: {error.name}. Install requirements.txt first.")
 

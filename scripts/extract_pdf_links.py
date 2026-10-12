@@ -42,7 +42,7 @@ NAV_FRAGMENT = re.compile(r"#(Home|P\d+)$")
 NUMBERED = re.compile(r"^\W*\d+\s*\.")
 BULLET = re.compile(r"^\s*[-–•+]")
 COLUMN_TITLES = {"ปัญหาที่พบ", "แนวทางแก้ไข"}
-GENERIC = re.compile(r"^(คลิก(ที่นี่|ดู)?|click( here)?|here|url)$", re.I)
+GENERIC = re.compile(r"^(?:คลิก(?:ที่นี่|ดู)?|click(?: here)?|here|url)(?:\s+(?:คลิก(?:ที่นี่|ดู)?|click(?: here)?|here|url))*$", re.I)
 ALT = re.compile(r"/Alt \(([^)]*)\)")
 THAI_MONTHS = "มกราคม|กุมภาพันธ์|มีนาคม|เมษายน|พฤษภาคม|มิถุนายน|กรกฎาคม|สิงหาคม|กันยายน|ตุลาคม|พฤศจิกายน|ธันวาคม"
 DATE_LABEL = re.compile(rf"^\d{{1,2}}(\s*-\s*\d{{1,2}})?\s+({THAI_MONTHS})")
@@ -108,6 +108,21 @@ def build_events(doc):
         for l in wide_bold:
             if l["text"] not in COLUMN_TITLES:
                 events.append((pno, l["y0"], "section", l["text"]))
+        full_width_rules = [rule for rule in page_grid(page)["horizontal"]
+                            if rule["x1"] - rule["x0"] >= page.rect.width * 0.5]
+        link_rects = [link["from"] for link in page.get_links()]
+        for line in lines:
+            center_x = (line["x0"] + line["x1"]) / 2
+            if (not line["bold"] or abs(center_x - page.rect.width / 2) > page.rect.width * 0.08
+                    or not TOP_MARGIN < line["y0"] < page.rect.height - BOTTOM_MARGIN):
+                continue
+            if any(rect.x0 <= line["x1"] and rect.x1 >= line["x0"]
+                   and rect.y0 <= line["y1"] and rect.y1 >= line["y0"] for rect in link_rects):
+                continue
+            enclosed = (any(0 <= line["y0"] - rule["y"] <= 18 for rule in full_width_rules)
+                        and any(0 <= rule["y"] - line["y1"] <= 18 for rule in full_width_rules))
+            if enclosed:
+                events.append((pno, line["y0"], "section", line["text"]))
         group, prev = [], None
         def flush():
             if group:
@@ -279,6 +294,88 @@ def column_lines(lk):
             and l["x1"] - l["x0"] <= COLUMN_TEXT_MAX_W and abs((l["x0"] + l["x1"]) / 2 - cx) <= COLUMN_HALF]
 
 
+def page_grid(page):
+    """Collect table-like horizontal and vertical rules from the PDF's vector drawings."""
+    grid = {"horizontal": [], "vertical": [], "page_width": page.rect.width}
+    for drawing in page.get_drawings():
+        for item in drawing["items"]:
+            if item[0] == "l":
+                first, second = item[1:3]
+                if abs(first.y - second.y) <= 1.5:
+                    left, right = sorted((first.x, second.x))
+                    grid["horizontal"].append({"y": (first.y + second.y) / 2, "x0": left, "x1": right})
+                elif abs(first.x - second.x) <= 1.5:
+                    top, bottom = sorted((first.y, second.y))
+                    grid["vertical"].append({"x": (first.x + second.x) / 2, "y0": top, "y1": bottom})
+            elif item[0] == "re":
+                rect = item[1]
+                grid["horizontal"].extend((
+                    {"y": rect.y0, "x0": rect.x0, "x1": rect.x1},
+                    {"y": rect.y1, "x0": rect.x0, "x1": rect.x1},
+                ))
+                grid["vertical"].extend((
+                    {"x": rect.x0, "y0": rect.y0, "y1": rect.y1},
+                    {"x": rect.x1, "y0": rect.y0, "y1": rect.y1},
+                ))
+    return grid
+
+
+def clustered_coordinates(values, tolerance=2.0):
+    clusters = []
+    for value in sorted(values):
+        if not clusters or value - clusters[-1][0] > tolerance:
+            clusters.append([value])
+        else:
+            clusters[-1].append(value)
+    return [sum(cluster) / len(cluster) for cluster in clusters]
+
+
+def table_row_detail(link, grid):
+    """Return the text from the cell left of a generic action link in the same ruled table row."""
+    if not grid:
+        return None
+
+    center_y = (link["y"] + link["y1"]) / 2
+    center_x = (link["x"] + link["x1"]) / 2
+    minimum_rule_width = max(48, grid["page_width"] * 0.08)
+    rule_ys = clustered_coordinates(
+        rule["y"]
+        for rule in grid["horizontal"]
+        if rule["x1"] - rule["x0"] >= minimum_rule_width
+        and rule["x0"] - 2 <= center_x <= rule["x1"] + 2
+    )
+    above = [y for y in rule_ys if y < center_y]
+    below = [y for y in rule_ys if y > center_y]
+    if not above or not below:
+        return None
+    row_top, row_bottom = above[-1], below[0]
+
+    verticals = clustered_coordinates(
+        rule["x"]
+        for rule in grid["vertical"]
+        if rule["y0"] - 2 <= center_y <= rule["y1"] + 2
+    )
+    left_boundaries = [x for x in verticals if x < center_x - 1]
+    if len(left_boundaries) < 2:
+        return None
+    action_cell_left, detail_cell_left = left_boundaries[-1], left_boundaries[-2]
+
+    row_lines = [
+        line for line in link["all_lines"]
+        if detail_cell_left - 2 <= (line["x0"] + line["x1"]) / 2 <= action_cell_left + 2
+        and row_top - 1 <= (line["y0"] + line["y1"]) / 2 <= row_bottom + 1
+        and not is_generic(line["text"])
+    ]
+    row_lines.sort(key=lambda line: (line["y0"], line["x0"]))
+    if not row_lines:
+        return None
+
+    detail = row_lines[0]["text"]
+    for line in row_lines[1:]:
+        detail = join_lines(detail, line["text"])
+    return detail
+
+
 def describe_image_link(lk, page_links):
     """Readable (sub_header, detail) for a link that has no text of its own, e.g. a "คลิก" button under a card.
 
@@ -341,6 +438,7 @@ def main():
     events = build_events(doc)
     found = collect_links(doc, args.include_nav)
     alts_by_annot = figure_alts(doc)
+    page_grids = {pno: page_grid(page) for pno, page in enumerate(doc, start=1)}
     entries = []
     for lk in found:
         section, label = context_at(events, lk["page"], lk["y1"] - 1)
@@ -348,18 +446,23 @@ def main():
         detail = lk["text"]
         generic = is_generic(detail)
         labelled = False
-        described = describe_image_link(lk, [o for o in found if o["page"] == lk["page"]])
-        if described and (described[2] or generic):
-            new_sub, detail, labelled = described
-            if labelled:
-                sub = new_sub or sub
-        elif generic:
-            alts = list(dict.fromkeys(a for x in lk["xrefs"] for a in alts_by_annot.get(x, [])))
-            inside = text_inside(lk)
-            target = lk["url"].partition("#")[2]
-            name = " ".join(alts) or target
-            detail = f"{name} – {inside}" if name and inside else (name or inside or f"ลิงก์รูปภาพ (หน้า {lk['page']})")
-            labelled = True    # image buttons sit in grids too; read them left to right
+        table_detail = table_row_detail(lk, page_grids.get(lk["page"])) if generic else None
+        if table_detail:
+            detail = table_detail
+            labelled = True    # Keep table action links in visual row order.
+        else:
+            described = describe_image_link(lk, [o for o in found if o["page"] == lk["page"]])
+            if described and (described[2] or generic):
+                new_sub, detail, labelled = described
+                if labelled:
+                    sub = new_sub or sub
+            elif generic:
+                alts = list(dict.fromkeys(a for x in lk["xrefs"] for a in alts_by_annot.get(x, [])))
+                inside = text_inside(lk)
+                target = lk["url"].partition("#")[2]
+                name = " ".join(alts) or target
+                detail = f"{name} – {inside}" if name and inside else (name or inside or f"ลิงก์รูปภาพ (หน้า {lk['page']})")
+                labelled = True    # image buttons sit in grids too; read them left to right
         entries.append({"lk": lk, "labelled": labelled,
                         "row": {"sub_header": sub, "detail": detail, "url": lk["url"], "page": lk["page"]}})
 

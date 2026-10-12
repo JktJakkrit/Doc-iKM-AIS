@@ -5,12 +5,35 @@ const generateButton = document.getElementById('generateButton');
 const resetButton = document.getElementById('resetButton');
 const statusBadge = document.getElementById('statusBadge');
 const notice = document.getElementById('notice');
+const confirmDialog = document.getElementById('confirmDialog');
+const confirmEyebrow = document.getElementById('confirmEyebrow');
+const confirmTitle = document.getElementById('confirmTitle');
+const confirmMessage = document.getElementById('confirmMessage');
+const confirmCancel = document.getElementById('confirmCancel');
+const confirmAction = document.getElementById('confirmAction');
 const pageCount = document.getElementById('pageCount');
 const rowCount = document.getElementById('rowCount');
 const previewRows = document.getElementById('previewRows');
 const uploadToggle = document.getElementById('uploadToggle');
 const uploadBody = document.getElementById('uploadBody');
 const uploadSummary = document.getElementById('uploadSummary');
+const themeToggle = document.getElementById('themeToggle');
+
+const syncThemeToggle = () => {
+  const isDark = document.documentElement.dataset.theme === 'dark';
+  themeToggle.setAttribute('aria-pressed', String(isDark));
+  themeToggle.title = isDark ? 'Switch to light theme' : 'Switch to dark theme';
+};
+
+syncThemeToggle();
+themeToggle.addEventListener('click', () => {
+  const theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+  document.documentElement.dataset.theme = theme;
+  try {
+    localStorage.setItem('ikm-theme', theme);
+  } catch {}
+  syncThemeToggle();
+});
 
 const setUploadExpanded = (expanded) => {
   uploadToggle.setAttribute('aria-expanded', String(expanded));
@@ -29,7 +52,7 @@ let activeSheet = '';
 const progress = document.getElementById('progress');
 const progressLabel = document.getElementById('progressLabel');
 const progressPercent = document.getElementById('progressPercent');
-const progressFill = document.getElementById('progressFill');
+const progressTrack = document.getElementById('progressTrack');
 
 
 let requestVersion = 0;
@@ -38,45 +61,30 @@ let nextRowId = 1;
 let draggedRowId = null;
 let activeRequest = null;
 let progressTimer = null;
-let progressValue = 0;
-let loadedFiles = [];     // every PDF read so far: { name, pages, rows, error }
-let busy = false;          // a PDF batch is being uploaded / read
+let confirmResolver = null;
+let loadedFiles = [];     // every source file read so far: { name, format, pages, rows, error }
+let busy = false;          // a file batch is being uploaded / read
 let filterText = '';
 
-const UPLOAD_SHARE = 30;   // % of the bar covered by the real upload
-const PROCESS_CAP = 95;    // the server gives no progress, so processing creeps toward this and finishes on reply
-
-const setProgress = (value, label, state = '') => {
-  progressValue = Math.max(0, Math.min(100, value));
-  const shown = Math.round(progressValue);
-  progress.hidden = false;
-  progress.classList.toggle('done', state === 'done');
-  progress.classList.toggle('failed', state === 'failed');
-  progress.setAttribute('aria-valuenow', String(shown));
-  progressFill.style.width = `${shown}%`;
-  progressPercent.textContent = `${shown}%`;
-  if (label) progressLabel.textContent = label;
-};
+const UPLOAD_SHARE = 30;
+const PROCESS_CAP = 95;
 
 const stopProgressTimer = () => {
   window.clearInterval(progressTimer);
   progressTimer = null;
 };
 
-const hideProgress = () => {
+const startProcessingProgress = (onTick = () => {}) => {
   stopProgressTimer();
-  progress.hidden = true;
-};
-
-const startProcessingProgress = (label) => {
-  stopProgressTimer();
-  setProgress(Math.max(progressValue, UPLOAD_SHARE), label);
+  let value = UPLOAD_SHARE;
   progressTimer = window.setInterval(() => {
-    setProgress(progressValue + (PROCESS_CAP - progressValue) * 0.05, label);
+    value += (PROCESS_CAP - value) * 0.05;
+    const nextValue = value;
+    onTick(nextValue);
   }, 250);
 };
 
-const uploadPdfs = (body, onUploadProgress) =>
+const uploadFiles = (body, onUploadProgress) =>
   new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     activeRequest = xhr;
@@ -97,11 +105,47 @@ const setNotice = (message, isError = false) => {
   notice.classList.toggle('error', isError);
 };
 
+const finishConfirmation = (confirmed) => {
+  const resolve = confirmResolver;
+  confirmResolver = null;
+  if (confirmDialog.open) confirmDialog.close();
+  resolve?.(confirmed);
+};
+
+const askConfirm = ({ eyebrow, title, message, confirmLabel }) => {
+  if (confirmDialog.open) return Promise.resolve(false);
+  confirmEyebrow.textContent = eyebrow;
+  confirmTitle.textContent = title;
+  confirmMessage.textContent = message;
+  confirmAction.textContent = confirmLabel;
+  return new Promise((resolve) => {
+    confirmResolver = resolve;
+    confirmDialog.showModal();
+    confirmCancel.focus();
+  });
+};
+
+confirmCancel.addEventListener('click', () => finishConfirmation(false));
+confirmAction.addEventListener('click', () => finishConfirmation(true));
+confirmDialog.addEventListener('cancel', (event) => {
+  event.preventDefault();
+  finishConfirmation(false);
+});
+
 const plural = (count, word) => `${count} ${word}${count === 1 ? '' : 's'}`;
 
-const renderFileList = (pending = []) => {
+const summarizeFileError = (message) => {
+  const text = String(message || '').replace(/\s+/g, ' ').trim();
+  if (!text) return 'Could not read this file.';
+  if (/FileDataError|FzErrorFormat|Failed to open file/i.test(text)) return 'Invalid or unreadable source file';
+  return text.length > 96 ? `${text.slice(0, 93)}…` : text;
+};
+
+const sourceFormat = () => 'PDF';
+
+const renderFileList = () => {
   fileList.replaceChildren();
-  const isEmpty = !loadedFiles.length && !pending.length;
+  const isEmpty = !loadedFiles.length;
   fileList.classList.toggle('is-empty', isEmpty);
   if (isEmpty) {
     // Same icon as the one in index.html: a centred document outline instead of the text "No files selected".
@@ -117,27 +161,114 @@ const renderFileList = (pending = []) => {
     return;
   }
 
-  const addItem = (fileName, text, isError = false) => {
+  const addItem = (file, index) => {
     const item = document.createElement('div');
-    item.className = 'file-item';
+    item.className = `file-item file-item--${file.status || 'success'}`;
+    item.dataset.state = file.status || 'success';
+    item.dataset.fileIndex = String(index);
+    item.setAttribute('aria-busy', String(file.status === 'reading'));
     const name = document.createElement('span');
     name.className = 'file-name';
-    name.textContent = fileName;
+    name.textContent = file.name;
     const details = document.createElement('span');
     details.className = 'file-count';
-    details.textContent = text;
-    if (isError) details.classList.add('error-text');
-    item.append(name, details);
+    if (file.status === 'pending') {
+      details.textContent = 'Waiting';
+    } else if (file.status === 'reading') {
+      details.textContent = `Reading ${file.format || sourceFormat(file.name)}…`;
+    } else if (file.status === 'failed') {
+      details.textContent = `Failed · ${summarizeFileError(file.error)}`;
+      details.title = file.error || 'Could not read this file.';
+      details.classList.add('error-text');
+    } else {
+      const currentRowCount = rows.filter((data) => data.sheet === file.sheet).length;
+      const sourceCount = document.createElement('span');
+      sourceCount.textContent = `PDF: ${plural(file.rows || 0, 'link')} · ${plural(file.pages || 0, 'page')}`;
+      const tableCount = document.createElement('span');
+      tableCount.textContent = `Table: ${plural(currentRowCount, 'row')}`;
+      details.append(sourceCount, tableCount);
+    }
+    const removeButton = document.createElement('button');
+    removeButton.type = 'button';
+    removeButton.className = 'file-remove';
+    removeButton.dataset.fileIndex = String(index);
+    removeButton.disabled = busy;
+    removeButton.title = busy ? 'Remove after processing completes' : 'Remove this file';
+    removeButton.setAttribute('aria-label', `Remove ${file.name} and its rows`);
+    removeButton.innerHTML =
+      '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M10 11v6m4-6v6M5 7l1 13h12l1-13M9 7V4h6v3" /></svg>';
+    item.append(name, details, removeButton);
+
+    if (file.status === 'reading') {
+      const overlay = document.createElement('div');
+      overlay.className = 'file-loading-overlay';
+      overlay.setAttribute('role', 'progressbar');
+      overlay.setAttribute('aria-label', `Reading ${file.name}`);
+      overlay.setAttribute('aria-valuemin', '0');
+      overlay.setAttribute('aria-valuemax', '100');
+      overlay.setAttribute('aria-valuenow', String(Math.round(file.progress || 0)));
+      const heading = document.createElement('span');
+      heading.className = 'file-loading-heading';
+      const label = document.createElement('span');
+      label.className = 'file-loading-label';
+      label.textContent = `Reading ${file.format || sourceFormat(file.name)}`;
+      const percent = document.createElement('span');
+      percent.className = 'file-loading-percent';
+      percent.textContent = `${Math.round(file.progress || 0)}%`;
+      heading.append(label, percent);
+      const track = document.createElement('span');
+      track.className = 'file-loading-track';
+      for (let segmentIndex = 0; segmentIndex < 7; segmentIndex += 1) {
+        const segment = document.createElement('span');
+        segment.className = 'file-loading-segment';
+        const fill = document.createElement('span');
+        fill.className = 'file-loading-segment-fill';
+        fill.style.width = `${Math.min(100, Math.max(0, (file.progress || 0) * 7 - segmentIndex * 100))}%`;
+        segment.append(fill);
+        track.append(segment);
+      }
+      overlay.append(heading, track);
+      item.append(overlay);
+    }
+
     fileList.append(item);
   };
 
-  loadedFiles.forEach((file) =>
-    file.error
-      ? addItem(file.name, `Error: ${file.error}`, true)
-      : addItem(file.name, `${plural(file.pages, 'page')} · ${plural(file.rows, 'link')}`),
-  );
-  pending.forEach((file) => addItem(file.name, 'Reading…'));
+  loadedFiles.forEach(addItem);
 };
+
+const updateFileLoadingProgress = (file, value) => {
+  file.progress = Math.max(file.progress || 0, Math.max(0, Math.min(100, value)));
+  const fileIndex = loadedFiles.indexOf(file);
+  const card = fileList.querySelector(`.file-item[data-file-index="${fileIndex}"]`);
+  if (!card) return;
+  const percent = Math.round(file.progress);
+  const overlay = card.querySelector('.file-loading-overlay');
+  overlay?.setAttribute('aria-valuenow', String(percent));
+  const label = card.querySelector('.file-loading-percent');
+  if (label) label.textContent = `${percent}%`;
+  card.querySelectorAll('.file-loading-segment-fill').forEach((fill, index) => {
+    fill.style.width = `${Math.min(100, Math.max(0, file.progress * 7 - index * 100))}%`;
+  });
+};
+
+const completeFileLoadingProgress = (file, version) =>
+  new Promise((resolve) => {
+    const startingProgress = file.progress || 0;
+    const startedAt = performance.now();
+    const duration = 300;
+    const animate = (now) => {
+      if (version !== requestVersion) {
+        resolve();
+        return;
+      }
+      const fraction = Math.min(1, (now - startedAt) / duration);
+      updateFileLoadingProgress(file, startingProgress + (100 - startingProgress) * fraction);
+      if (fraction < 1) requestAnimationFrame(animate);
+      else resolve();
+    };
+    requestAnimationFrame(animate);
+  });
 
 const refreshUploadSummary = () => {
   if (!loadedFiles.length) {
@@ -145,9 +276,58 @@ const refreshUploadSummary = () => {
     return;
   }
   const pages = loadedFiles.reduce((sum, file) => sum + (file.pages || 0), 0);
-  uploadSummary.textContent = `${plural(loadedFiles.length, 'PDF')} · ${plural(pages, 'page')} · ${plural(rows.length, 'link')}`;
+  const pageSummary = pages ? ` · ${plural(pages, 'page')}` : '';
+  uploadSummary.textContent = `${plural(loadedFiles.length, 'file')}${pageSummary} · ${plural(rows.length, 'link')}`;
   pageCount.textContent = String(pages);
 };
+
+const removeLoadedFile = async (file) => {
+  if (busy) return;
+  const removedRows = file.sheet ? rows.filter((data) => data.sheet === file.sheet) : [];
+  if (
+    removedRows.length &&
+    !(await askConfirm({
+      eyebrow: 'Remove file',
+      title: 'Remove this file?',
+      message: `“${file.name}” has ${plural(removedRows.length, 'row')}. Removing it will also discard those rows and their edits.`,
+      confirmLabel: 'Remove file',
+    }))
+  ) {
+    return;
+  }
+
+  loadedFiles = loadedFiles.filter((loadedFile) => loadedFile !== file);
+  if (file.sheet) rows = rows.filter((data) => data.sheet !== file.sheet);
+  if (activeSheet === file.sheet) activeSheet = rows[0]?.sheet ?? '';
+
+  if (!loadedFiles.length) {
+    rowFilter.value = '';
+    filterText = '';
+    pageCount.textContent = '0';
+    stopProgressTimer();
+    setUploadExpanded(true);
+    statusBadge.textContent = 'Waiting for files';
+  } else {
+    statusBadge.textContent = rows.length ? 'Ready to export' : 'No rows';
+  }
+
+  renderFileList();
+  refreshRows();
+  refreshUploadSummary();
+  const removedSummary = removedRows.length ? ` and its ${plural(removedRows.length, 'row')}` : '';
+  setNotice(
+    loadedFiles.length
+      ? `Removed ${file.name}${removedSummary}. ${plural(loadedFiles.length, 'file')} ${loadedFiles.length === 1 ? 'remains' : 'remain'}.`
+      : `Removed ${file.name}${removedSummary}. No files remain.`,
+  );
+};
+
+fileList.addEventListener('click', (event) => {
+  const button = event.target.closest('button[data-file-index]');
+  if (!button || button.disabled) return;
+  const file = loadedFiles[Number(button.dataset.fileIndex)];
+  if (file) void removeLoadedFile(file);
+});
 
 const ROW_ACTIONS = [
   { action: 'insert-above', label: '+↑', title: 'Insert a new row above' },
@@ -310,13 +490,13 @@ const renderPreview = () => {
     row.className = 'placeholder-row';
     const cell = document.createElement('td');
     cell.colSpan = 6;
-    cell.textContent = 'No rows yet. Read a PDF to extract its links.';
+    cell.textContent = 'No rows yet. Read a PDF file to extract its links.';
     row.append(cell);
     previewRows.append(row);
     return;
   }
 
-  // With several PDFs only the selected one is listed; export still writes every one, one sheet each.
+  // With several source files only the selected one is listed; export still writes each one on its own sheet.
   const sheetRows = rows.filter((data) => data.sheet === activeSheet);
   const visibleRows = sheetRows.filter(matchesFilter);
   filterCount.hidden = !filterText;
@@ -412,12 +592,14 @@ const insertRowAt = (position, inheritFrom) => {
   });
   rows.splice(position, 0, row);
   refreshRows();
+  renderFileList();
   previewRows.querySelector(`[data-row-id="${row.id}"] .editable-cell:nth-child(4)`)?.focus();
 };
 
 const deleteRow = (index) => {
   rows.splice(index, 1);
   refreshRows();
+  renderFileList();
 };
 
 rowFilter.addEventListener('input', () => {
@@ -570,116 +752,181 @@ const uniqueSheetName = (name, taken) => {
   return candidate;
 };
 
-// New PDFs are added to the ones already loaded; a repeated PDF name becomes "name (2)".
+// New source files are added to the ones already loaded; repeated names get a numbered suffix.
 const processFiles = async (files) => {
-  const pdfFiles = Array.from(files).filter(
-    (file) => file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf'),
-  );
-  const skippedFiles = files.length - pdfFiles.length;
+  const sourceFiles = Array.from(files).filter((file) => /\.pdf$/i.test(file.name));
+  const skippedFiles = files.length - sourceFiles.length;
 
   if (busy) {
-    setNotice('Still reading the previous PDFs. Add more files when it finishes.', true);
+    setNotice('Still reading the previous files. Add more when it finishes.', true);
     return;
   }
 
-  if (!pdfFiles.length) {
+  if (!sourceFiles.length) {
     if (!loadedFiles.length) {
-      hideProgress();
+      stopProgressTimer();
       setUploadExpanded(true);
-      uploadSummary.textContent = 'No PDF selected';
-      statusBadge.textContent = 'PDF required';
+      uploadSummary.textContent = 'No source file selected';
+      statusBadge.textContent = 'File required';
     }
-    setNotice('Choose browser-saved PDF files to extract their actual clickable links.', true);
+    setNotice('Choose PDF files to extract their clickable links.', true);
     return;
   }
 
   busy = true;
   const version = ++requestVersion;
+  const batchFiles = sourceFiles.map((file) => ({
+    name: file.name,
+    format: sourceFormat(file.name),
+    pages: 0,
+    rows: 0,
+    sheet: '',
+    progress: 0,
+    status: 'pending',
+    error: '',
+  }));
+  loadedFiles = loadedFiles.concat(batchFiles);
   generateButton.disabled = true;
-  renderFileList(pdfFiles);
-  uploadSummary.textContent = `Reading ${pdfFiles.length} PDF${pdfFiles.length > 1 ? 's' : ''}…`;
-  statusBadge.textContent = 'Reading PDFs';
-  setNotice('Reading every page and extracting the links embedded in the PDF. Please keep this page open.');
-
-  const body = new FormData();
-  pdfFiles.forEach((file) => body.append('files', file, file.name));
-
-  setProgress(0, 'Uploading PDF…');
+  renderFileList();
+  statusBadge.textContent = 'Reading files';
+  setNotice('Reading source files and extracting their clickable links. Please keep this page open.');
+  const fileErrors = [];
+  let addedCount = 0;
+  let firstAddedSheet = '';
 
   try {
-    const { ok, status, result } = await uploadPdfs(body, (fraction) => {
+    for (let index = 0; index < sourceFiles.length; index += 1) {
       if (version !== requestVersion) return;
-      if (fraction < 1) setProgress(fraction * UPLOAD_SHARE, 'Uploading PDF…');
-      else startProcessingProgress('Reading pages and extracting links…');
-    });
-    if (version !== requestVersion) return;
-    if (!ok) throw new Error(result.error || `Conversion failed (${status}).`);
-    stopProgressTimer();
-    setProgress(100, 'Done', 'done');
-    window.setTimeout(() => {
-      if (version === requestVersion) hideProgress();
-    }, 1200);
+      const sourceFile = sourceFiles[index];
+      const fileRecord = batchFiles[index];
+      const fileLabel = `${index + 1}/${sourceFiles.length}`;
+      let processingProgressStarted = false;
 
-    const taken = new Set(rows.map((data) => data.sheet.toLowerCase()));
-    const renamed = new Map();
-    const added = (result.rows || []).map((data) => {
-      if (!renamed.has(data.sheet)) renamed.set(data.sheet, uniqueSheetName(data.sheet || 'PDF', taken));
-      return createRow({ ...data, sheet: renamed.get(data.sheet) });
-    });
-    rows = rows.concat(added);
-    if (added.length) activeSheet = added[0].sheet;
-    loadedFiles = loadedFiles.concat(
-      (result.files || []).map((file) => ({
-        name: file.filename,
-        pages: file.pages,
-        rows: file.rows,
-        error: file.error,
-      })),
-    );
-    renderFileList();
+      fileRecord.status = 'reading';
+      uploadSummary.textContent = `Reading ${fileLabel}: ${sourceFile.name}`;
+      statusBadge.textContent = `Reading file ${fileLabel}`;
+      renderFileList();
+
+      const body = new FormData();
+      body.append('files', sourceFile, sourceFile.name);
+
+      let response;
+      try {
+        response = await uploadFiles(body, (fraction) => {
+          if (version !== requestVersion) return;
+          if (fraction >= 1) {
+            if (!processingProgressStarted) {
+              processingProgressStarted = true;
+              updateFileLoadingProgress(fileRecord, UPLOAD_SHARE);
+              startProcessingProgress((value) => updateFileLoadingProgress(fileRecord, value));
+            }
+          } else if (!processingProgressStarted) {
+            updateFileLoadingProgress(fileRecord, fraction * UPLOAD_SHARE);
+          }
+        });
+      } catch (error) {
+        if (version !== requestVersion) return;
+        if (error instanceof DOMException && error.name === 'AbortError') throw error;
+        stopProgressTimer();
+        await completeFileLoadingProgress(fileRecord, version);
+        if (version !== requestVersion) return;
+        fileRecord.status = 'failed';
+        fileRecord.error = error instanceof Error ? error.message : String(error);
+        fileErrors.push({ filename: sourceFile.name, message: fileRecord.error });
+        renderFileList();
+        continue;
+      }
+
+      if (version !== requestVersion) return;
+      stopProgressTimer();
+      await completeFileLoadingProgress(fileRecord, version);
+      if (version !== requestVersion) return;
+      const { ok, status, result } = response;
+      const fileSummary = result.files?.[0];
+      const failure = !ok
+        ? result.error || `Conversion failed (${status}).`
+        : (result.errors || [])[0]?.message || fileSummary?.error || (!fileSummary ? 'No file result was returned.' : '');
+
+      fileRecord.name = fileSummary?.filename || sourceFile.name;
+      fileRecord.format = fileSummary?.format || fileRecord.format;
+      fileRecord.pages = fileSummary?.pages || 0;
+      fileRecord.rows = fileSummary?.rows || 0;
+
+      if (failure) {
+        fileRecord.status = 'failed';
+        fileRecord.error = failure;
+        fileErrors.push({ filename: fileRecord.name, message: failure });
+      } else {
+        const taken = new Set(
+          [...rows.map((data) => data.sheet), ...loadedFiles.filter((file) => file !== fileRecord).map((file) => file.sheet)]
+            .filter(Boolean)
+            .map((sheet) => sheet.toLowerCase()),
+        );
+        const sheetName = uniqueSheetName(sourceFile.name.replace(/\.pdf$/i, '') || 'Source', taken);
+        fileRecord.sheet = sheetName;
+        fileRecord.status = 'success';
+        const added = (result.rows || []).map((data) => createRow({ ...data, sheet: sheetName }));
+        rows = rows.concat(added);
+        addedCount += added.length;
+        if (!firstAddedSheet && added.length) firstAddedSheet = sheetName;
+      }
+
+      stopProgressTimer();
+      renderFileList();
+    }
+
+    if (version !== requestVersion) return;
+    if (firstAddedSheet) activeSheet = firstAddedSheet;
     refreshRows();
     refreshUploadSummary();
     setUploadExpanded(false);
-
-    const fileErrors = result.errors || [];
+    stopProgressTimer();
     if (fileErrors.length) {
       statusBadge.textContent = 'Some files failed';
       setNotice(
-        `${added.length} link rows added; ${fileErrors.length} PDF(s) could not be read: ${fileErrors
-          .map((error) => `${error.filename}: ${error.message}`)
+        `${addedCount} link rows added; ${fileErrors.length} source file(s) could not be read: ${fileErrors
+          .map((error) => `${error.filename}: ${summarizeFileError(error.message)}`)
           .join(' · ')}`,
         true,
       );
     } else if (skippedFiles) {
       statusBadge.textContent = 'Ready to export';
-      setNotice(`${added.length} link rows added. ${skippedFiles} non-PDF file(s) were ignored.`);
+      setNotice(`${addedCount} link rows added. ${skippedFiles} unsupported file(s) were ignored.`);
     } else if (!rows.length) {
       statusBadge.textContent = 'No clickable URLs';
       setNotice(
-        'No external clickable links were found. Use a browser-saved PDF (Chrome/Edge → Print → Save as PDF); a visible “Click” label alone does not contain its destination.',
+        'No clickable web links were found. Use a browser-saved PDF; visible text alone does not contain its destination.',
         true,
       );
     } else {
       statusBadge.textContent = 'Ready to export';
       setNotice(
-        `${added.length} linked rows added from ${pdfFiles.length} PDF(s) (${rows.length} rows in ${loadedFiles.length} PDF(s) now). Navigation links were skipped, as specified by the skill.${
-          loadedFiles.length > 1 ? ' Pick a PDF tab to view or edit it; Export Excel combines all of them into one workbook, one sheet per PDF.' : ''
+        `${addedCount} linked rows added from ${sourceFiles.length} file(s) (${rows.length} rows in ${loadedFiles.length} file(s) now). Navigation links were skipped.${
+          loadedFiles.length > 1 ? ' Pick a file tab to view or edit it; Export Excel combines all of them into one workbook, one sheet per file.' : ''
         }`,
       );
     }
   } catch (error) {
     if (version !== requestVersion) return;
-    console.error('PDF conversion failed:', error);
+    console.error('File conversion failed:', error);
     stopProgressTimer();
-    setProgress(progressValue, 'Failed', 'failed');
+    const message = error instanceof Error ? error.message : String(error);
+    batchFiles.forEach((file) => {
+      if (file.status === 'pending' || file.status === 'reading') {
+        file.status = 'failed';
+        file.error = message;
+      }
+    });
     setUploadExpanded(true);
     renderFileList();
     refreshUploadSummary();
-    if (!loadedFiles.length) uploadSummary.textContent = 'Could not read the PDF';
     statusBadge.textContent = 'Conversion failed';
-    setNotice(error instanceof Error ? error.message : String(error), true);
+    setNotice(message, true);
   } finally {
-    if (version === requestVersion) busy = false;
+    if (version === requestVersion) {
+      busy = false;
+      renderFileList();
+    }
     updateSummary();
   }
 };
@@ -753,23 +1000,33 @@ const downloadWorkbook = async () => {
   }
 };
 
-const clearFiles = () => {
-  if (rows.length && !window.confirm('Clear all files and rows? Your edits will be lost.')) return;
+const clearFiles = async () => {
+  if (
+    rows.length &&
+    !(await askConfirm({
+      eyebrow: 'Clear workspace',
+      title: 'Clear all files?',
+      message: 'All loaded files, preview rows, and edits will be removed.',
+      confirmLabel: 'Clear all',
+    }))
+  ) {
+    return;
+  }
   requestVersion += 1;
   busy = false;
   activeRequest?.abort();
-  hideProgress();
+  stopProgressTimer();
   setUploadExpanded(true);
   sourceInput.value = '';
   loadedFiles = [];
   rowFilter.value = '';
   filterText = '';
   pageCount.textContent = '0';
-  statusBadge.textContent = 'Waiting for PDF';
+  statusBadge.textContent = 'Waiting for files';
   renderFileList();
   setRows([]);
   refreshUploadSummary();
-  setNotice('Only rows with a real clickable URL are included. PDF text or a visible “Click” label alone is not a URL.');
+  setNotice('Only rows with an actual clickable link are included. Visible text alone is not a URL.');
 };
 
 dropZone.addEventListener('click', (event) => {

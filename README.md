@@ -1,9 +1,9 @@
 # iKM PDF to Excel
 
-A local web app that turns browser-saved iKM pages (PDF) into an Excel workbook. Every clickable link in the PDF becomes a row; the rows are laid out in the nine columns of the sample file: **Header, sub header, Detail, Link, Link D, PRC, NLP, common, Web points**. You review and edit the rows in the browser first, then export (or copy) them.
+A local web app that turns browser-saved iKM PDFs into an Excel workbook. Every clickable link becomes a row; the rows are laid out in the nine columns of the sample file: **Header, sub header, Detail, Link, Link D, PRC, NLP, common, Web points**. You review and edit the rows in the browser first, then export (or copy) them.
 
 - Only rows with a real clickable URL are kept. Text in the PDF, or a visible "Click" label, is not a URL.
-- Several PDFs can be loaded at once. They are exported into **one workbook with one sheet per PDF**.
+- Several PDF files can be loaded at once. They are exported into **one workbook with one sheet per file**.
 - Everything runs on your own computer. The server listens on `127.0.0.1` only.
 
 ## Contents
@@ -33,9 +33,9 @@ Requirements: Python with `openpyxl` and `PyMuPDF` (both in `requirements.txt`).
 
 ## How to use it
 
-1. **Save the iKM page as a PDF.** In Chrome or Edge open the page, then **Print → Save as PDF** (a screenshot, or "Microsoft Print to PDF", does not keep the links).
-2. **Drop the PDF(s) into the Upload area**, or click it to browse. You can pick several PDFs at once.
-3. **Wait for the progress bar.** The upload area then folds up into a single line such as `2 PDFs · 29 pages · 78 links`, and the table moves up.
+1. **Save the iKM page as PDF.** Use **Print → Save as PDF**; a screenshot or "Microsoft Print to PDF" does not keep clickable links.
+2. **Drop the PDF file(s) into the Upload area**, or click it to browse.
+3. **Wait for the progress bar.** The upload area then folds up into a summary such as `2 files · 29 pages · 78 links`, and the table moves up.
 4. **Review the table** (see [The preview table](#the-preview-table)): fix Detail text, adjust rows, search.
 5. **Get the result**, either way:
    - **Export Excel** downloads one `.xlsx` (one sheet per PDF), or
@@ -43,15 +43,15 @@ Requirements: Python with `openpyxl` and `PyMuPDF` (both in `requirements.txt`).
 
 ![After reading two PDFs: the upload area folded into one line, one tab per PDF, and the preview table](docs/images/02-preview.png)
 
-### Adding more PDFs later
+### Adding more files later
 
-Open the **Upload PDF files** panel again (click its header) and drop more PDFs. They are **added** to the ones already loaded and nothing you edited is lost. A PDF with the same name as one already loaded becomes `name (2)`. Wait for the current read to finish before adding more. **Clear** removes everything and asks for confirmation first.
+Open the **Upload PDF files** panel again (click its header) and drop more files. They are **added** to the ones already loaded and nothing you edited is lost. A file with the same name as one already loaded becomes `name (2)`. Wait for the current read to finish before adding more. **Clear** removes everything and asks for confirmation first.
 
 ![The Upload PDF files panel opened again, listing the PDFs already read](docs/images/03-upload-panel.png)
 
-### Several PDFs
+### Several source files
 
-The preview shows one **tab per PDF** with its row count. Click a tab to view or edit that PDF. The tabs only change what you see: **Export Excel** always writes every PDF, each on its own sheet.
+The preview shows one **tab per file** with its row count. Click a tab to view or edit that file. The tabs only change what you see: **Export Excel** always writes every file, each on its own sheet.
 
 ![The second tab (Billing Help) selected](docs/images/07-second-tab.png)
 
@@ -64,7 +64,7 @@ The preview shows one **tab per PDF** with its row count. Click a tab to view or
 | **sub header** | Section / problem label. Shown only when it changes. |
 | **Detail** | The link's text. |
 | **Link** | `เปิดลิงก์ ↗` opens the original URL. In Excel this cell reads `URL` and carries the hyperlink. |
-| **Row** | Row tools (below). |
+| **Action** | Row tools (below). |
 
 What you can edit:
 
@@ -73,7 +73,7 @@ What you can edit:
 - The **Link** of an extracted row stays the original URL.
 - Cells accept **plain text only**: pasted formatting is dropped, line breaks become spaces, and `Enter` just leaves the cell.
 
-Row tools (the **Row** column):
+Row tools (the **Action** column):
 
 - `⠿` drag to reorder · `+↑` / `+↓` insert a new row above / below · `✕` delete.
 - A row you add can have its own Header, sub header, Detail and **URL**, which must start with `http://` or `https://`; rows with an empty or invalid URL block the export until you fix or delete them.
@@ -114,13 +114,13 @@ Describing links that have no text:
 
 ## Tips and troubleshooting
 
-- **"The bundled iKM PDF extractor or Excel builder is missing from scripts/"** on start-up: `scripts/extract_pdf_links.py` or `scripts/build_xlsx.py` is missing. Both must be present.
-- **"No external clickable links were found" / zero rows (or a `NO LINKS` message):** the PDF was probably printed as an image. Save it again with the browser's **Save as PDF**.
+- **"A bundled iKM file extractor or the Excel builder is missing from scripts/"** on start-up: one of the extractor scripts or `scripts/build_xlsx.py` is missing.
+- **Zero rows:** the PDF may have been printed as an image. Save again from the live page and make sure the PDF keeps clickable links.
 - **Weird or old behaviour after changing code:** make sure only one `python server.py` is running. On Windows a second server can share the same port and answer some requests, so stop old ones before restarting.
-- **Slow or large PDFs:** reading time depends on the page count. The progress bar moves to about 95% while the server works and finishes when it replies.
+- **Slow or large files:** PDF reading time depends on the page count. The progress bar moves to about 95% while the server works and finishes when it replies.
 - The page itself does not scroll; only the table does. If your window is very short, the page scrolls as a last resort.
 
-There are no automated tests. To check a change, run the app and convert a real browser-saved PDF, then export and open the workbook.
+Run the automated checks with `python -m unittest discover -s tests -v`. For extraction changes, also convert a real browser-saved PDF, then export and open the workbook.
 
 ## Command-line use
 
@@ -140,7 +140,7 @@ python scripts/build_xlsx.py --json more.json --append result.xlsx
 
 | Path | Purpose |
 | --- | --- |
-| `server.py` | Serves the page and two endpoints: `POST /api/convert` (PDFs → rows, tagging each PDF as a sheet) and `POST /api/export` (reviewed rows → `.xlsx`, base64) |
+| `server.py` | Serves the page and two endpoints: `POST /api/convert` (PDF files → rows, tagging each file as a sheet) and `POST /api/export` (reviewed rows → `.xlsx`, base64) |
 | `scripts/extract_pdf_links.py` | Reads link annotations, text and image tags from a PDF (PyMuPDF) |
 | `scripts/build_xlsx.py` | Writes the workbook (openpyxl), one sheet per `sheet` |
 | `index.html`, `styles.css`, `script.js` | The browser interface: upload panel, preview table, tabs, search, copy, export |
