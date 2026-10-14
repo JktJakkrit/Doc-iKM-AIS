@@ -35,19 +35,32 @@ Requirements: Python with `openpyxl` and `PyMuPDF` (both in `requirements.txt`).
 
 ## How to use it
 
-1. **Save the iKM page as PDF.** Use **Print → Save as PDF**; a screenshot or "Microsoft Print to PDF" does not keep clickable links.
-2. **Drop the PDF file(s) into the Upload area**, or click it to browse.
-3. **Wait for the progress bar.** The upload area then folds up into a summary such as `2 files · 29 pages · 78 links`, and the table moves up.
-4. **Review the table** (see [The preview table](#the-preview-table)): fix Detail text, adjust rows, search.
-5. **Get the result**, either way:
-   - **Export Excel** downloads one `.xlsx` (one sheet per PDF), or
-   - **⧉ Copy table** copies the open tab so you can paste it into Excel yourself.
+1. **Start the app.** Run `python server.py` and open the address it prints (default `http://127.0.0.1:8000/`). See [Quick start](#quick-start).
+2. **Save the iKM page as PDF.** In your browser use **Print → Save as PDF**. A screenshot or "Microsoft Print to PDF" does not keep clickable links. Repeat for every page you need.
+3. **Add the PDF file(s).** Drag them onto the Upload area, or click it to browse. Only `.pdf` files are accepted, and you can pick several at once.
+4. **Wait for the read to finish.** Each file shows its own progress while the server extracts the links. A file that cannot be read is marked **Failed** with the reason, and the other files are still loaded. When done, the upload area folds into a summary such as `2 files · 29 pages · 78 links` and the table appears.
+5. **Pick a file tab.** Each PDF gets its own tab with its row count. Click a tab to view or edit that file.
+6. **Review and fix the rows** (see [The preview table](#the-preview-table)):
+   1. Check **Detail** text and edit it where needed.
+   2. Edit **Header / sub header** if a group is wrong (unlock the cell to change just one row).
+   3. Open the pencil in **Link** to correct a URL (it must start with `http://` or `https://`).
+   4. Reorder with `⠿`, delete with `✕`, or add a row with the circled `+` between rows.
+   5. Use **Search rows…** to find a row; use **Undo / Redo** (Ctrl+Z / Ctrl+Y) if you change your mind.
+7. **Add or remove files if needed.** Open the **Upload PDF files** panel to add more PDFs, or press the trash-can button on a file's card to remove it and its rows (see below).
+8. **Get the result**, either way:
+   - **Export Excel** downloads one `.xlsx` (one sheet per PDF). If any hand-added or edited URL is empty or invalid, a **Check rows before export** dialog lists them; fix them and export again.
+   - **⧉ Copy table** copies the open tab so you can paste it into Excel yourself (see [Copy table](#copy-table)).
+9. **Start over (optional).** **Clear** removes every file and row after a confirmation.
 
 ![After reading two PDFs: the upload area folded into one line, one tab per PDF, and the preview table](docs/images/02-preview.png)
 
 ### Adding more files later
 
 Open the **Upload PDF files** panel again (click its header) and drop more files. They are **added** to the ones already loaded and nothing you edited is lost. A file with the same name as one already loaded becomes `name (2)`. Wait for the current read to finish before adding more. **Clear** removes everything and asks for confirmation first.
+
+### Removing one file
+
+In the opened **Upload PDF files** panel every file has its own card with a trash-can button. It removes that file and its rows (its tab and Excel sheet) and leaves the other files untouched. If the file has rows, a **Remove this file?** dialog asks you to confirm first, because your edits to those rows are lost. The buttons are disabled while files are being read, and Undo / Redo history is reset after a removal.
 
 ![The Upload PDF files panel opened again, listing the PDFs already read](docs/images/03-upload-panel.png)
 
@@ -96,7 +109,7 @@ Toolbar above the table:
 - **Search rows…** filters the open tab by Header, sub header, Detail or URL and shows `N of M`. Matching visible text is highlighted in browsers supporting the CSS Custom Highlight API (case-insensitive, literal search). It only changes what you see: export and copy always include every row. Rows you just added stay visible while you search.
 - **⧉ Copy table** (see below).
 
-![Searching for "invoice": 2 of 10 rows match, and the row numbers stay the same](docs/images/04-search.png)
+![Searching for "roaming": 4 of 10 rows match, and the row numbers stay the same](docs/images/04-search.png)
 
 Describing links that have no text:
 
