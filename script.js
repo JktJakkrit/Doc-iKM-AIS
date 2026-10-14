@@ -18,21 +18,53 @@ const uploadToggle = document.getElementById('uploadToggle');
 const uploadBody = document.getElementById('uploadBody');
 const uploadSummary = document.getElementById('uploadSummary');
 const themeToggle = document.getElementById('themeToggle');
+const undoButton = document.getElementById('undoButton');
+const redoButton = document.getElementById('redoButton');
+const exportCheckDialog = document.getElementById('exportCheckDialog');
+const exportCheckSummary = document.getElementById('exportCheckSummary');
+const exportIssues = document.getElementById('exportIssues');
+const linkDialog = document.getElementById('linkDialog');
+const linkForm = document.getElementById('linkForm');
+const linkUrl = document.getElementById('linkUrl');
+const linkError = document.getElementById('linkError');
+const restoreLink = document.getElementById('restoreLink');
+let editingLinkId = null;
 
 const syncThemeToggle = () => {
   const isDark = document.documentElement.dataset.theme === 'dark';
   themeToggle.setAttribute('aria-pressed', String(isDark));
   themeToggle.title = isDark ? 'Switch to light theme' : 'Switch to dark theme';
+  themeToggle.setAttribute('aria-label', themeToggle.title);
 };
 
 syncThemeToggle();
-themeToggle.addEventListener('click', () => {
+let themeTransitionRunning = false;
+themeToggle.addEventListener('click', async () => {
+  if (themeTransitionRunning) return;
   const theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
-  document.documentElement.dataset.theme = theme;
+  const applyTheme = () => {
+    document.documentElement.dataset.theme = theme;
+    try {
+      localStorage.setItem('ikm-theme', theme);
+    } catch {}
+    syncThemeToggle();
+  };
+  if (!document.startViewTransition || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    applyTheme();
+    return;
+  }
+  themeTransitionRunning = true;
+  document.documentElement.classList.add('theme-crossfading');
   try {
-    localStorage.setItem('ikm-theme', theme);
-  } catch {}
-  syncThemeToggle();
+    // Crossfade snapshots so gradients and table surfaces change together.
+    await document.startViewTransition(applyTheme).finished;
+  } catch (error) {
+    console.error('Theme transition failed.', error);
+    applyTheme();
+  } finally {
+    document.documentElement.classList.remove('theme-crossfading');
+    themeTransitionRunning = false;
+  }
 });
 
 const setUploadExpanded = (expanded) => {
@@ -65,6 +97,50 @@ let confirmResolver = null;
 let loadedFiles = [];     // every source file read so far: { name, format, pages, rows, error }
 let busy = false;          // a file batch is being uploaded / read
 let filterText = '';
+const undoStack = [];
+const redoStack = [];
+let editingSession = null;
+
+const historySnapshot = () => ({ rows: structuredClone(rows), activeSheet });
+const updateHistoryButtons = () => {
+  undoButton.disabled = busy || !undoStack.length;
+  redoButton.disabled = busy || !redoStack.length;
+};
+const recordHistory = (snapshot = historySnapshot()) => {
+  undoStack.push(snapshot);
+  redoStack.length = 0;
+  updateHistoryButtons();
+};
+const resetHistory = () => {
+  undoStack.length = 0;
+  redoStack.length = 0;
+  editingSession = null;
+  updateHistoryButtons();
+};
+const restoreHistory = (source, destination, label) => {
+  if (busy || !source.length) return;
+  destination.push(historySnapshot());
+  const snapshot = source.pop();
+  rows = structuredClone(snapshot.rows);
+  activeSheet = snapshot.activeSheet;
+  editingSession = null;
+  refreshRows();
+  renderFileList();
+  refreshUploadSummary();
+  updateHistoryButtons();
+  setNotice(`${label}.`);
+};
+undoButton.addEventListener('click', () => restoreHistory(undoStack, redoStack, 'Undone'));
+redoButton.addEventListener('click', () => restoreHistory(redoStack, undoStack, 'Redone'));
+document.addEventListener('keydown', (event) => {
+  if (!(event.ctrlKey || event.metaKey) || event.altKey || event.isComposing) return;
+  if (event.target.closest('input, textarea, select') || confirmDialog.open || exportCheckDialog.open || linkDialog.open) return;
+  const key = event.key.toLowerCase();
+  if (key !== 'z' && key !== 'y') return;
+  event.preventDefault();
+  if (key === 'y' || event.shiftKey) redoButton.click();
+  else undoButton.click();
+});
 
 const UPLOAD_SHARE = 30;
 const PROCESS_CAP = 95;
@@ -296,6 +372,7 @@ const removeLoadedFile = async (file) => {
     return;
   }
 
+  resetHistory();
   loadedFiles = loadedFiles.filter((loadedFile) => loadedFile !== file);
   if (file.sheet) rows = rows.filter((data) => data.sheet !== file.sheet);
   if (activeSheet === file.sheet) activeSheet = rows[0]?.sheet ?? '';
@@ -330,8 +407,6 @@ fileList.addEventListener('click', (event) => {
 });
 
 const ROW_ACTIONS = [
-  { action: 'insert-above', label: '+↑', title: 'Insert a new row above' },
-  { action: 'insert-below', label: '+↓', title: 'Insert a new row below' },
   { action: 'delete', label: '✕', title: 'Delete row' },
 ];
 
@@ -342,8 +417,11 @@ const createRow = (values = {}) => ({
   sheet: '',
   detail: '',
   url: '',
+  originalUrl: values.custom ? null : (values.url ?? ''),
   page: 0,
   custom: false,
+  headerMode: 'auto',
+  subHeaderMode: 'auto',
   ...values,
 });
 
@@ -356,6 +434,88 @@ const isHttpUrl = (value) => {
   }
 };
 
+const openLinkEditor = (row) => {
+  editingLinkId = row.id;
+  linkUrl.value = row.url;
+  linkError.textContent = '';
+  linkUrl.removeAttribute('aria-invalid');
+  document.getElementById('linkContext').textContent = `${row.sheet || '(no name)'} · ${row.detail}`;
+  restoreLink.hidden = row.originalUrl === null;
+  restoreLink.title = row.originalUrl ?? '';
+  linkDialog.showModal();
+  linkUrl.focus();
+  linkUrl.select();
+};
+
+restoreLink.addEventListener('click', () => {
+  const row = rows.find((item) => item.id === editingLinkId);
+  linkUrl.value = row.originalUrl;
+  linkError.textContent = '';
+  linkUrl.removeAttribute('aria-invalid');
+  linkUrl.focus();
+});
+document.getElementById('cancelLink').addEventListener('click', () => linkDialog.close());
+linkDialog.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    linkDialog.close();
+  }
+});
+linkDialog.addEventListener('close', () => {
+  previewRows.querySelector(`[data-row-id="${editingLinkId}"] [data-action="edit-link"]`)?.focus();
+  editingLinkId = null;
+});
+linkUrl.addEventListener('input', () => {
+  linkError.textContent = '';
+  linkUrl.removeAttribute('aria-invalid');
+});
+linkForm.addEventListener('submit', (event) => {
+  event.preventDefault();
+  const row = rows.find((item) => item.id === editingLinkId);
+  const value = linkUrl.value.trim();
+  // Original PDF destinations may use schemes other than HTTP; restoration must preserve them.
+  const original = row.originalUrl !== null && linkUrl.value === row.originalUrl;
+  if (!original && !isHttpUrl(value)) {
+    linkError.textContent = 'Enter a valid full URL starting with http:// or https://.';
+    linkUrl.setAttribute('aria-invalid', 'true');
+    linkUrl.focus();
+    return;
+  }
+  const nextUrl = original ? row.originalUrl : value;
+  if (nextUrl !== row.url) {
+    recordHistory();
+    row.url = nextUrl;
+    refreshRows();
+    setNotice('Link updated. You can undo this change.');
+  }
+  linkDialog.close();
+});
+
+const linkCell = (row) => {
+  const cell = document.createElement('td');
+  const controls = document.createElement('div');
+  controls.className = 'link-controls';
+  if (row.url) {
+    const anchor = document.createElement('a');
+    anchor.textContent = 'เปิดลิงก์ ↗';
+    anchor.title = row.url;
+    anchor.href = row.url;
+    anchor.target = '_blank';
+    anchor.rel = 'noopener noreferrer';
+    controls.append(anchor);
+  }
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'row-button link-edit-button';
+  button.dataset.action = 'edit-link';
+  button.title = row.url ? 'Edit URL' : 'Add URL';
+  button.setAttribute('aria-label', button.title);
+  button.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m16 3 5 5-12 12-6 1 1-6Z M14 5l5 5"/></svg>';
+  controls.append(button);
+  cell.append(controls);
+  return cell;
+};
+
 const updateSummary = () => {
   rowCount.textContent = String(rows.length);
   generateButton.disabled = rows.length === 0;
@@ -366,6 +526,39 @@ const matchesFilter = (data) =>
   !filterText ||
   data.custom ||    // rows the user just added stay visible even while their fields are still empty
   `${data.header} ${data.subHeader} ${data.detail} ${data.url}`.toLowerCase().includes(filterText);
+
+const highlightFilterMatches = () => {
+  if (!CSS.highlights) return;
+  CSS.highlights.delete('filter-match');
+  if (!filterText) return;
+  const highlight = new Highlight();
+  const pattern = new RegExp(filterText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'giu');
+  previewRows.querySelectorAll('tr[data-row-id]').forEach((row) => {
+    // Use ranges rather than markup so editing, copying and stored values stay unchanged.
+    [...row.cells].slice(2, 6).forEach((cell) => {
+      const walker = document.createTreeWalker(cell.querySelector('.heading-text') || cell, NodeFilter.SHOW_TEXT);
+      const nodes = [];
+      let text = '';
+      while (walker.nextNode()) {
+        const node = walker.currentNode;
+        nodes.push({ node, start: text.length, end: text.length + node.length });
+        text += node.textContent;
+      }
+      for (const match of text.matchAll(pattern)) {
+        const start = nodes.find((part) => part.end > match.index);
+        const endOffset = match.index + match[0].length;
+        const end = nodes.find((part) => part.end >= endOffset);
+        const range = document.createRange();
+        range.setStart(start.node, match.index - start.start);
+        range.setEnd(end.node, endOffset - end.start);
+        highlight.add(range);
+      }
+    });
+  });
+  CSS.highlights.set('filter-match', highlight);
+};
+
+previewRows.addEventListener('input', highlightFilterMatches);
 
 const insertPlainText = (text) => {
   if (document.execCommand('insertText', false, text)) return;
@@ -381,13 +574,22 @@ const insertPlainText = (text) => {
   selection.addRange(range);
 };
 
-const editableCell = (row, key, title) => {
-  const cell = document.createElement('td');
+const editableCell = (row, key, title, tag = 'td') => {
+  const cell = document.createElement(tag);
   cell.textContent = row[key];
   cell.contentEditable = 'true';
   cell.spellcheck = false;
   cell.className = 'editable-cell';
   cell.title = title;
+  cell.addEventListener('focus', () => {
+    editingSession = { cell, snapshot: historySnapshot(), recorded: false };
+  });
+  cell.addEventListener('beforeinput', (event) => {
+    if (event.inputType === 'historyUndo' || event.inputType === 'historyRedo') {
+      event.preventDefault();
+      (event.inputType === 'historyUndo' ? undoButton : redoButton).click();
+    }
+  });
   // Pasted HTML would bring its own colours / fonts (e.g. black text on the dark table): keep plain text only.
   cell.addEventListener('paste', (event) => {
     event.preventDefault();
@@ -401,6 +603,15 @@ const editableCell = (row, key, title) => {
     }
   });
   cell.addEventListener('input', () => {
+    if (!editingSession || editingSession.cell !== cell) {
+      editingSession = { cell, snapshot: historySnapshot(), recorded: false };
+    }
+    if (!editingSession.recorded) {
+      recordHistory(editingSession.snapshot);
+      editingSession.recorded = true;
+    }
+    redoStack.length = 0;
+    updateHistoryButtons();
     row[key] = cell.textContent;
     cell.closest('tr')?.classList.remove('invalid');
   });
@@ -412,12 +623,6 @@ const actionsCell = () => {
   cell.className = 'actions-cell';
   const group = document.createElement('div');
   cell.append(group);
-  const handle = document.createElement('span');
-  handle.className = 'drag-handle';
-  handle.textContent = '⠿';
-  handle.title = 'Drag to reorder';
-  handle.draggable = true;
-  group.append(handle);
   ROW_ACTIONS.forEach(({ action, label, title }) => {
     const button = document.createElement('button');
     button.type = 'button';
@@ -431,28 +636,58 @@ const actionsCell = () => {
   return cell;
 };
 
-const GROUP_COLUMNS = { header: 1, subHeader: 2 };    // cell index in a row (cell 0 is the row number)
-
-// Header / sub header: the first row of a group is editable and its edits flow to the repeated rows below;
-// repeated (grey) cells are read-only.
-const groupCell = (row, key, title, repeated) => {
-  if (repeated) {
-    const cell = document.createElement('td');
-    cell.textContent = row[key];
-    cell.className = 'repeat-cell';
-    return cell;
+const headingCell = (row, key) => {
+  const cell = document.createElement('td');
+  cell.className = 'heading-cell';
+  const mode = row[`${key}Mode`];
+  const previousRow = rows.slice(0, rows.indexOf(row)).findLast((item) => item.sheet === row.sheet);
+  const repeated = previousRow ? previousRow[key] === row[key] : !row[key];
+  const editable = mode === 'unlocked' || (mode === 'auto' && !repeated);
+  const text = editable
+    ? editableCell(row, key, mode === 'auto' ? 'Edit heading for this group' : 'Edit this heading only', 'div')
+    : document.createElement('div');
+  text.classList.add('heading-text');
+  if (!editable) {
+    text.textContent = row[key] ? '~' : '';
+    text.classList.add('repeat-cell');
+    text.title = row[key];
+    text.setAttribute('aria-label', row[key]);
   }
-  const cell = editableCell(row, key, title);
-  let previous = row[key];
-  cell.addEventListener('input', () => {
-    const start = rows.indexOf(row);
-    for (let i = start + 1; i < rows.length && rows[i].sheet === row.sheet && rows[i][key] === previous; i += 1) {
-      rows[i][key] = row[key];
-      const target = previewRows.querySelector(`[data-row-id="${rows[i].id}"]`)?.children[GROUP_COLUMNS[key]];
-      if (target) target.textContent = row[key];
-    }
-    previous = row[key];
-  });
+  if (editable && mode === 'auto') {
+    let previous = row[key];
+    text.addEventListener('input', () => {
+      const start = rows.indexOf(row);
+      for (let i = start + 1; i < rows.length && rows[i].sheet === row.sheet && rows[i][key] === previous; i += 1) {
+        if (rows[i][`${key}Mode`] === 'auto') rows[i][key] = row[key];
+      }
+      previous = row[key];
+    });
+  }
+  if (editable) {
+    text.addEventListener('input', () => {
+      rows.forEach((item) => {
+        if (item === row) return;
+        const target = previewRows.querySelector(`[data-row-id="${item.id}"] .heading-cell[data-key="${key}"]`);
+        if (target) target.replaceWith(headingCell(item, key));
+      });
+    });
+  }
+  cell.dataset.key = key;
+  const toggle = document.createElement('button');
+  toggle.type = 'button';
+  toggle.className = 'heading-mode';
+  toggle.dataset.action = 'heading-mode';
+  toggle.dataset.key = key;
+  toggle.dataset.mode = mode;
+  const label = `${key === 'header' ? 'Header' : 'Sub header'}: ${mode === 'auto' ? 'Locked / Auto. Unlock this cell' : 'Unlocked. Restore Locked / Auto'}`;
+  toggle.title = label;
+  toggle.setAttribute('aria-label', label);
+  const paths = {
+    auto: '<rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V6a4 4 0 0 1 8 0v4M12 14v3"/>',
+    unlocked: '<rect x="5" y="10" width="14" height="11" rx="2"/><path d="M9 10V6a4 4 0 0 1 8 0M12 14v3"/>',
+  };
+  toggle.innerHTML = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[mode]}</svg>`;
+  cell.append(text, toggle);
   return cell;
 };
 
@@ -481,7 +716,30 @@ const renderSheetTabs = () => {
   });
 };
 
+const insertionBoundary = (data, excelRow, below = false) => {
+  const boundary = document.createElement('tr');
+  boundary.className = 'insert-boundary';
+  const cell = document.createElement('td');
+  cell.colSpan = 7;
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'insert-row-button';
+  button.dataset.action = below ? 'insert-below' : 'insert-above';
+  button.dataset.anchorId = String(data.id);
+  const label = `Insert a new row ${below ? 'below' : 'above'} Excel row ${excelRow}`;
+  button.title = label;
+  button.setAttribute('aria-label', label);
+  const icon = document.createElement('span');
+  icon.className = 'insert-row-icon';
+  icon.setAttribute('aria-hidden', 'true');
+  button.append(icon);
+  cell.append(button);
+  boundary.append(cell);
+  return boundary;
+};
+
 const renderPreview = () => {
+  CSS.highlights?.delete('filter-match');
   previewRows.replaceChildren();
   renderSheetTabs();
   if (!rows.length) {
@@ -489,7 +747,7 @@ const renderPreview = () => {
     const row = document.createElement('tr');
     row.className = 'placeholder-row';
     const cell = document.createElement('td');
-    cell.colSpan = 6;
+    cell.colSpan = 7;
     cell.textContent = 'No rows yet. Read a PDF file to extract its links.';
     row.append(cell);
     previewRows.append(row);
@@ -505,43 +763,43 @@ const renderPreview = () => {
     const row = document.createElement('tr');
     row.className = 'placeholder-row';
     const cell = document.createElement('td');
-    cell.colSpan = 6;
+    cell.colSpan = 7;
     cell.textContent = `No rows match “${rowFilter.value.trim()}”.`;
     row.append(cell);
     previewRows.append(row);
     return;
   }
-  let lastHeader = '';
-  let lastSubHeader = '';
   // Numbers match the Excel row: the header row is 1, so the first data row is 2. Search never renumbers them.
   const positions = new Map(sheetRows.map((data, index) => [data.id, index + 2]));
   visibleRows.forEach((data) => {
+    previewRows.append(insertionBoundary(data, positions.get(data.id)));
     const row = document.createElement('tr');
     row.dataset.rowId = String(data.id);
     const number = document.createElement('td');
     number.className = 'row-number';
+    const reorder = document.createElement('td');
+    reorder.className = 'reorder-cell';
+    const handle = document.createElement('span');
+    handle.className = 'drag-handle';
+    handle.textContent = '⠿';
+    handle.title = 'Drag to reorder';
+    handle.draggable = true;
+    reorder.append(handle);
     number.textContent = String(positions.get(data.id));
     number.title = `Row ${positions.get(data.id)} in this sheet of the Excel file (row 1 is the header)`;
-    row.append(number);
+    row.append(reorder, number);
     if (data.custom) {
       row.classList.add('custom-row');
       row.append(
-        editableCell(data, 'header', 'Header for this row'),
-        editableCell(data, 'subHeader', 'Sub header for this row'),
+        headingCell(data, 'header'),
+        headingCell(data, 'subHeader'),
         editableCell(data, 'detail', 'Detail text'),
-        editableCell(data, 'url', 'Full URL (https://…) this row links to'),
+        linkCell(data),
       );
     } else {
-      const header = groupCell(data, 'header', 'Click to edit Header (applies to the rows below that repeat it)', data.header === lastHeader);
-      const subHeader = groupCell(data, 'subHeader', 'Click to edit sub header (applies to the rows below that repeat it)', data.subHeader === lastSubHeader);
-      const link = document.createElement('td');
-      const anchor = document.createElement('a');
-      anchor.textContent = 'เปิดลิงก์ ↗';
-      anchor.title = data.url;
-      anchor.href = data.url;
-      anchor.target = '_blank';
-      anchor.rel = 'noopener noreferrer';
-      link.append(anchor);
+      const header = headingCell(data, 'header');
+      const subHeader = headingCell(data, 'subHeader');
+      const link = linkCell(data);
       row.append(
         header,
         subHeader,
@@ -551,9 +809,10 @@ const renderPreview = () => {
     }
     row.append(actionsCell());
     previewRows.append(row);
-    lastHeader = data.header;
-    lastSubHeader = data.subHeader;
   });
+  const lastVisible = visibleRows[visibleRows.length - 1];
+  previewRows.append(insertionBoundary(lastVisible, positions.get(lastVisible.id), true));
+  highlightFilterMatches();
 };
 
 const refreshRows = () => {
@@ -578,25 +837,31 @@ const rowIndexOf = (id) => rows.findIndex((row) => row.id === Number(id));
 
 const moveRow = (from, to) => {
   if (from < 0 || to < 0 || to >= rows.length || from === to) return;
+  recordHistory();
   const [moved] = rows.splice(from, 1);
   rows.splice(to, 0, moved);
   refreshRows();
 };
 
 const insertRowAt = (position, inheritFrom) => {
+  recordHistory();
+  const sheet = inheritFrom?.sheet ?? '';
+  const previousRow = rows.slice(0, position).findLast((item) => item.sheet === sheet);
+  const headingSource = previousRow ?? inheritFrom;
   const row = createRow({
     custom: true,
-    header: inheritFrom?.header ?? '',
-    subHeader: inheritFrom?.subHeader ?? '',
-    sheet: inheritFrom?.sheet ?? '',
+    header: headingSource?.header ?? '',
+    subHeader: headingSource?.subHeader ?? '',
+    sheet,
   });
   rows.splice(position, 0, row);
   refreshRows();
   renderFileList();
-  previewRows.querySelector(`[data-row-id="${row.id}"] .editable-cell:nth-child(4)`)?.focus();
+  previewRows.querySelector(`[data-row-id="${row.id}"] > td:nth-child(5)`)?.focus();
 };
 
 const deleteRow = (index) => {
+  recordHistory();
   rows.splice(index, 1);
   refreshRows();
   renderFileList();
@@ -703,14 +968,28 @@ copyButton.addEventListener('click', async () => {
 
 previewRows.addEventListener('click', (event) => {
   const button = event.target.closest('button[data-action]');
+  if (button?.dataset.anchorId) {
+    const index = rowIndexOf(button.dataset.anchorId);
+    if (index >= 0) insertRowAt(index + (button.dataset.action === 'insert-below' ? 1 : 0), rows[index]);
+    return;
+  }
   const tr = button?.closest('tr');
   if (!tr) return;
   const index = rowIndexOf(tr.dataset.rowId);
   if (index < 0) return;
   const { action } = button.dataset;
-  if (action === 'insert-above') insertRowAt(index, rows[index]);
-  else if (action === 'insert-below') insertRowAt(index + 1, rows[index]);
-  else if (action === 'delete') deleteRow(index);
+  if (action === 'delete') deleteRow(index);
+  else if (action === 'edit-link') openLinkEditor(rows[index]);
+  else if (action === 'heading-mode') {
+    recordHistory();
+    const row = rows[index];
+    const { key } = button.dataset;
+    const modeKey = `${key}Mode`;
+    row[modeKey] = row[modeKey] === 'auto' ? 'unlocked' : 'auto';
+    renderPreview();
+    previewRows.querySelector(`[data-row-id="${row.id}"] .heading-mode[data-key="${key}"]`)?.focus();
+    setNotice(`${key === 'header' ? 'Header' : 'Sub header'} mode: ${row[modeKey]}. ${row[modeKey] === 'auto' ? 'Automatic grouping restored.' : 'This setting affects only this cell.'} Your edits are kept.`);
+  }
 });
 
 previewRows.addEventListener('dragstart', (event) => {
@@ -774,6 +1053,7 @@ const processFiles = async (files) => {
   }
 
   busy = true;
+  resetHistory();
   const version = ++requestVersion;
   const batchFiles = sourceFiles.map((file) => ({
     name: file.name,
@@ -925,10 +1205,49 @@ const processFiles = async (files) => {
   } finally {
     if (version === requestVersion) {
       busy = false;
+      resetHistory();
       renderFileList();
     }
     updateSummary();
   }
+};
+
+const showExportIssues = (invalidRows) => {
+  exportIssues.replaceChildren();
+  exportCheckSummary.textContent = `${plural(invalidRows.length, 'row')} need a valid URL before export. Fix or delete these rows, then export again.`;
+  const positions = new Map();
+  const counts = new Map();
+  rows.forEach((row) => {
+    const position = (counts.get(row.sheet) ?? 1) + 1;
+    counts.set(row.sheet, position);
+    positions.set(row.id, position);
+  });
+  invalidRows.forEach((row) => {
+    const item = document.createElement('li');
+    const description = document.createElement('p');
+    const reason = row.url.trim() ? 'Invalid URL — use a full http:// or https:// URL.' : 'URL is empty.';
+    description.textContent = `${row.sheet || '(no name)'} · Excel row ${positions.get(row.id)} · ${reason}`;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'text-button tool-button';
+    button.textContent = 'Go to URL';
+    button.setAttribute('aria-label', `Fix URL in ${row.sheet || '(no name)'}, Excel row ${positions.get(row.id)}`);
+    button.addEventListener('click', () => {
+      exportCheckDialog.close();
+      activeSheet = row.sheet;
+      rowFilter.value = '';
+      filterText = '';
+      refreshRows();
+      const target = previewRows.querySelector(`[data-row-id="${row.id}"]`);
+      target.classList.add('invalid');
+      target.scrollIntoView({ block: 'center' });
+      openLinkEditor(row);
+      setNotice(`Excel row ${positions.get(row.id)}: ${reason}`, true);
+    });
+    item.append(description, button);
+    exportIssues.append(item);
+  });
+  exportCheckDialog.showModal();
 };
 
 const downloadWorkbook = async () => {
@@ -938,19 +1257,12 @@ const downloadWorkbook = async () => {
     return;
   }
 
-  const invalidIndex = rows.findIndex((data) => data.custom && !isHttpUrl(data.url.trim()));
-  if (invalidIndex >= 0) {
-    if (rows[invalidIndex].sheet !== activeSheet) {
-      activeSheet = rows[invalidIndex].sheet;
-      refreshRows();
-    }
-    const invalidRow = previewRows.querySelector(`[data-row-id="${rows[invalidIndex].id}"]`);
-    invalidRow?.classList.add('invalid');
-    invalidRow?.scrollIntoView({ block: 'center' });
+  const invalidRows = rows.filter((data) =>
+    (data.custom || data.url !== data.originalUrl) && !isHttpUrl(data.url.trim()));
+  if (invalidRows.length) {
     statusBadge.textContent = 'Check rows';
-    const where = rows[invalidIndex].sheet ? ` in “${rows[invalidIndex].sheet}”` : '';
-    const position = rows.filter((data) => data.sheet === rows[invalidIndex].sheet).indexOf(rows[invalidIndex]) + 1;
-    setNotice(`Row ${position}${where} needs a full URL starting with http:// or https://, or delete the row.`, true);
+    setNotice(`${plural(invalidRows.length, 'row')} need valid URLs before export.`, true);
+    showExportIssues(invalidRows);
     return;
   }
 
@@ -1025,6 +1337,7 @@ const clearFiles = async () => {
   statusBadge.textContent = 'Waiting for files';
   renderFileList();
   setRows([]);
+  resetHistory();
   refreshUploadSummary();
   setNotice('Only rows with an actual clickable link are included. Visible text alone is not a URL.');
 };

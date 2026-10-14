@@ -15,7 +15,7 @@
         }
       } catch {}
     </script>
-    <link rel="stylesheet" href="styles.css?v=dark-reading-lime" />
+    <link rel="stylesheet" href="styles.css?v=link-editor" />
   </head>
   <body>
     <main class="app">
@@ -111,6 +111,8 @@
             <span><strong id="pageCount">0</strong> pages</span>
             <span><strong id="rowCount">0</strong> link rows</span>
             <div class="preview-tools">
+              <button class="text-button tool-button" id="undoButton" type="button" title="Undo table change (Ctrl+Z / Cmd+Z)" disabled>↶ Undo</button>
+              <button class="text-button tool-button" id="redoButton" type="button" title="Redo table change (Ctrl+Y / Ctrl+Shift+Z / Cmd+Shift+Z)" disabled>↷ Redo</button>
               <input id="rowFilter" type="search" placeholder="Search rows…" aria-label="Search rows in this table" spellcheck="false" />
               <span class="filter-count" id="filterCount" hidden></span>
               <button class="text-button tool-button" id="copyButton" type="button" title="Copy this sheet's rows as they will appear in Excel (no header row, all rows, ignoring the search)" disabled>⧉ Copy table</button>
@@ -123,6 +125,7 @@
             <table>
               <thead>
                 <tr>
+                  <th aria-label="Reorder rows" title="Drag to reorder rows"></th>
                   <th title="Row number in the Excel sheet (row 1 is the header). Web only, not exported.">#</th>
                   <th>Header</th>
                   <th>sub header</th>
@@ -133,7 +136,7 @@
               </thead>
               <tbody id="previewRows">
                 <tr class="placeholder-row">
-                  <td colspan="6">Your linked rows will appear here after the source files are read.</td>
+                  <td colspan="7">Your linked rows will appear here after the source files are read.</td>
                 </tr>
               </tbody>
             </table>
@@ -141,8 +144,9 @@
 
           <details class="column-note">
             <summary>How this table works</summary>
+            <p>Each Header / sub header has a top-right icon toggling Locked / Auto (closed lock) and Unlocked (open lock). All rows start in Locked / Auto: repeated values appear as a grey ~; group headings remain editable and changes flow to consecutive matching Auto cells, skipping Unlocked cells. New rows inherit headings from the preceding row in the same tab (or the first row when inserted at the top), so Copy / Excel omit repeated headings. Unlock a cell to enter a different heading for that row only. Switching back keeps your edits and restores automatic grouping.</p>
             <p>
-              The export keeps all 9 sample columns. With several source files, pick a tab to view or edit one file; export combines them into one workbook with one sheet each. Grey Header / sub header text repeats the row above (the Excel file shows it once per group). Only the Link column carries the hyperlink: it shows “URL” in Excel, and “เปิดลิงก์ ↗” in the preview. Detail is plain text. You can edit Detail on every row and Header / sub header on the first row of each group (the grey repeated cells follow it and are read-only; the Link of extracted rows stays the original URL), insert rows above or below (+↑ / +↓), reorder rows by dragging ⠿, and delete rows (✕) in the preview before exporting. Rows you add need a full http(s) URL.
+              The export keeps all 9 sample columns. With several source files, pick a tab to view or edit one file; export combines them into one workbook with one sheet each. Only the Link column carries the hyperlink: it shows “URL” in Excel, and “เปิดลิงก์ ↗” in the preview. Detail is plain text and editable on every row. Use the pencil in Link to edit its full URL, then Save; PDF rows offer “Use original URL” to restore their source destination. Cancel discards the draft. Insert rows by clicking the circled + at a row boundary; the green line is a non-clickable position indicator (the button is also accessible with Tab then Enter or Space, and always visible on touch screens). Reorder rows by dragging ⠿, and delete rows (✕) before exporting. New or edited URLs need a full http(s) URL.
             </p>
           </details>
         </aside>
@@ -169,6 +173,30 @@
       </div>
     </dialog>
 
-    <script src="script.js"></script>
+    <dialog class="confirm-dialog export-check-dialog" id="exportCheckDialog" aria-labelledby="exportCheckTitle" aria-describedby="exportCheckSummary">
+      <h2 id="exportCheckTitle">Check rows before export</h2>
+      <p id="exportCheckSummary"></p>
+      <ul id="exportIssues" class="export-issues"></ul>
+      <form method="dialog">
+        <button class="text-button tool-button" autofocus>Back to table</button>
+      </form>
+    </dialog>
+
+    <dialog class="confirm-dialog link-editor" id="linkDialog" aria-labelledby="linkTitle">
+      <form id="linkForm" novalidate>
+        <h2 id="linkTitle">Edit link</h2>
+        <p id="linkContext"></p>
+        <label for="linkUrl">Full URL</label>
+        <input id="linkUrl" type="url" spellcheck="false" autocomplete="off" aria-describedby="linkHelp linkError" />
+        <p id="linkHelp">Enter a full http:// or https:// URL. Changes apply only after Save.</p>
+        <p id="linkError" class="error-text" role="alert"></p>
+        <div class="link-editor-actions">
+          <button class="text-button tool-button" id="restoreLink" type="button">Use original URL</button>
+          <button class="text-button tool-button" id="cancelLink" type="button">Cancel</button>
+          <button class="text-button tool-button" type="submit">Save link</button>
+        </div>
+      </form>
+    </dialog>
+    <script src="script.js?v=insert-auto-headings"></script>
   </body>
 </html>

@@ -25,6 +25,8 @@ python server.py
 
 The terminal prints the address to open (default `http://127.0.0.1:8000/`). Set the `PORT` environment variable to use another port; if the port is busy the server tries the next ones. Press `Ctrl+C` in the terminal to stop it.
 
+The theme button remembers your light/dark preference. Browsers with the View Transition API crossfade the whole page over 720 ms, with a gentle rotating/bouncing icon. Reduced-motion preferences disable this animation; other browsers switch themes without the page crossfade.
+
 Requirements: Python with `openpyxl` and `PyMuPDF` (both in `requirements.txt`).
 
 ![Start screen: drop PDF files here](docs/images/01-start.png)
@@ -60,29 +62,38 @@ The preview shows one **tab per file** with its row count. Click a tab to view o
 | Column | What it shows |
 | --- | --- |
 | **#** | The row number as it will be in the Excel sheet. The header row is row 1, so the first data row is **2**. Each tab counts on its own and the search never renumbers rows. Web only, never exported. |
-| **Header** | The page title. Written once per group in Excel; the grey repeats below are read-only. |
-| **sub header** | Section / problem label. Shown only when it changes. |
+| **Header** | The page title. Written once per group in Excel. Grey text means read-only in the preview (Auto repeat or manually Locked). |
+| **sub header** | Section / problem label. Repeated values are omitted in Excel; the preview shows the value on every row. |
 | **Detail** | The link's text. |
-| **Link** | `เปิดลิงก์ ↗` opens the original URL. In Excel this cell reads `URL` and carries the hyperlink. |
+| **Link** | `เปิดลิงก์ ↗` opens the current URL; the pencil opens its editor. In Excel this cell reads `URL` and carries the hyperlink. |
 | **Action** | Row tools (below). |
 
 What you can edit:
 
 - **Detail** on every row.
-- **Header / sub header** on the first row of a group (the grey rows below follow it).
-- The **Link** of an extracted row stays the original URL.
+- **Header / sub header** according to each cell's mode (below).
+- **Link** on every row: click the pencil to edit the full URL in a dialog, then Save. New destinations must be valid `http(s)` URLs. Cancel or Escape discards the draft. PDF rows also offer **Use original URL**, which fills the original destination into the editor; Save applies the restoration. Originals are preserved even if they use another scheme. Saving and restoring support Undo / Redo; Copy / Export use the current saved URL.
 - Cells accept **plain text only**: pasted formatting is dropped, line breaks become spaces, and `Enter` just leaves the cell.
 
-Row tools (the **Action** column):
+Each **Header / sub header** has a top-right icon toggling **Locked / Auto (closed lock) ↔ Unlocked (open lock)** independently. All rows start in Locked / Auto: values repeating the preceding row in the same sheet are grey/read-only; group headings remain editable and editing them updates consecutive matching Auto cells below, skipping Unlocked cells. The closed lock means automatic grouping, not that every cell is read-only. Unlocked allows editing only that cell. Switching back to Locked / Auto keeps edits and recalculates whether the cell repeats; search does not change which row is its predecessor. Modes survive filtering, reordering and tab changes but reset on reload with the loaded data. Detail stays editable; URL editing uses the pencil dialog. Modes do not affect Copy / Excel layout: repeated headings are still suppressed automatically.
 
-- `⠿` drag to reorder · `+↑` / `+↓` insert a new row above / below · `✕` delete.
+New hand-added rows inherit Header / sub header from the preceding row in the same sheet, including hidden rows when searching. When inserted before the first row, they inherit that first row's headings instead. They start in Auto and show grey `~` for repeated headings; Copy / Excel leave those repeated cells blank. Group edits also update matching Auto headings on hand-added rows. To use a different heading, unlock just that cell and enter it; a genuinely new heading is included in Copy / Excel.
+
+Row tools (drag handle in its own first column, before **#**; delete in **Action**):
+
+Repeated non-empty Header / sub header values in Locked / Auto appear as a grey `~` in the preview. Hover over the marker to see the full heading, or unlock the cell to edit it. Empty headings stay blank. This marker is display-only: search still matches the full stored heading, and Copy / Excel never substitutes `~` for it.
+
+- `⠿` drag to reorder · `✕` delete. To insert a row, click the circled `+` at a row boundary, including before the first or after the last row. The green line is a position indicator only and does not accept clicks. Tab to the insertion button and press Enter or Space for keyboard use; touch screens always show the controls. When searching, insertion is immediately before the indicated row (or after the last visible row), without moving hidden rows.
 - A row you add can have its own Header, sub header, Detail and **URL**, which must start with `http://` or `https://`; rows with an empty or invalid URL block the export until you fix or delete them.
+
+When Export finds invalid URLs in hand-added rows or edited PDF destinations, a dialog lists all issues across all tabs, including rows hidden by search. Each entry shows the sheet, Excel row number, and whether the URL is empty or invalid. **Go to URL** opens the correct tab, clears search and opens the URL editor. Fix or delete the listed rows and export again; no export request is sent while issues remain. Unmodified or restored PDF destinations are preserved and are not subject to the edited URL rule.
 
 ![A row added by hand (row 3) with its own Detail and URL](docs/images/05-row-tools.png)
 
 Toolbar above the table:
 
-- **Search rows…** filters the open tab by Header, sub header, Detail or URL and shows `N of M`. It only changes what you see: export and copy always include every row. Rows you just added stay visible while you search.
+- **Undo / Redo** reverses text edits (one editing session per focused cell, including grouped changes), row insertion/deletion/reordering, and Header / sub header mode changes. Use Ctrl+Z / Cmd+Z to undo and Ctrl+Y or Ctrl+Shift+Z / Cmd+Shift+Z to redo. Search inputs keep their normal text shortcuts. New edits discard redo history. History stays in memory across tab/search changes and resets when PDFs are uploaded, a file is removed, Clear is confirmed, or the page reloads. Uploads themselves are not undoable; history controls are disabled during reading.
+- **Search rows…** filters the open tab by Header, sub header, Detail or URL and shows `N of M`. Matching visible text is highlighted in browsers supporting the CSS Custom Highlight API (case-insensitive, literal search). It only changes what you see: export and copy always include every row. Rows you just added stay visible while you search.
 - **⧉ Copy table** (see below).
 
 ![Searching for "invoice": 2 of 10 rows match, and the row numbers stay the same](docs/images/04-search.png)
