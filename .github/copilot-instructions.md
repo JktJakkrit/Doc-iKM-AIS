@@ -1,68 +1,47 @@
 # Copilot instructions for iKM PDF to Excel
 
-## Purpose
-This repository is a local web app that converts browser-saved iKM PDFs into Excel workbooks. The app is intentionally lightweight: a static frontend (`index.html`, `styles.css`, `script.js`) talks to a local Python server (`server.py`) that extracts clickable PDF links and builds an `.xlsx` workbook.
+## Project map
+- This repository is a local static web app with a Python server; do not introduce a frontend build system, database, or a second app shell for routine changes.
+- The browser UI lives in `index.html`, `styles.css`, and `script.js`. `server.py` serves the app and translates between HTTP JSON and the helper scripts.
+- The actual PDF work happens in helper scripts under `scripts/`: `extract_pdf_links.py` reads link annotations, text, and image tags from each PDF, while `build_xlsx.py` writes the workbook used for export.
+- The supported import flow is PDF-only. Do not restore or add MHTML support unless a clear product requirement demands it.
+- This repo's source of truth for workflows and edge cases is `README.md`; follow it instead of inventing UI or export behavior.
 
-## Commands
-### Local setup
+## Build, test, and validation commands
 ```powershell
 python -m pip install -r requirements.txt
+python -m unittest discover -s tests -v
+python -m unittest tests.test_extract_pdf_links -v
+python -m unittest tests.test_extract_pdf_links.LinkedTableMappingTests.test_maps_action_links_to_menu_text_in_the_same_table_row -v
 python server.py
 ```
+- There is no dedicated linter configured for this repository.
+- The app binds to `127.0.0.1` only and defaults to port `8000`; `PORT` can override it and the server increments ports if needed.
+- For PDF/extraction/export changes, run the full unittest suite and then do a smoke test with a real browser-saved PDF to confirm both the preview and the downloaded workbook match the expected behavior.
+- When diagnosing startup problems, account for the existing `bs4` reference in `server.py` even though it is not in `requirements.txt`.
 
-The server prints the URL to open after startup. It honors the `PORT` env var (default `8000`) and tries up to 19 following ports if that one is busy.
+## High-level architecture
+- Browser upload flow: the user selects or drops PDFs in the UI, `script.js` sends them to `POST /api/convert`, and `server.py` parses the multipart upload.
+- Conversion step: `server.py` writes each PDF to a temp file, invokes `scripts/extract_pdf_links.py` as a subprocess, and then normalizes the resulting JSON for the browser.
+- Review flow: the browser stores the extracted rows in its in-memory `rows` array, lets the user edit/search them, and treats the table as the source of truth for preview behavior.
+- Export flow: `script.js` sends the edited rows to `POST /api/export`; `server.py` calls `scripts/build_xlsx.py`, which writes one sheet per source PDF and returns the workbook as base64 data.
+- The app is intentionally local-only and does not use a database or build pipeline. Keep that boundary intact for new work.
 
-### Missing helper scripts (important)
-`server.py` shells out to `scripts/extract_pdf_links.py` and `scripts/build_xlsx.py` and exits immediately with `The bundled iKM PDF extractor or Excel builder is missing from scripts/.` if either is absent. In this checkout `scripts/` and `tests/` contain only stale `__pycache__` files, and the sources are not tracked in git. The originals are bundled in `ikm-page-to-excel.skill` (a zip) under `ikm-page-to-excel/scripts/` (and `ikm-page-to-excel/app/scripts/`); its `SKILL.md` documents their CLI and options. Restore them from there rather than rewriting them:
-```powershell
-Expand-Archive ikm-page-to-excel.skill -DestinationPath $env:TEMP\ikm-skill -Force
-Copy-Item $env:TEMP\ikm-skill\ikm-page-to-excel\scripts\*.py scripts\
-```
+## Key conventions and repo-specific invariants
+- Preserve the static UI → Python API → subprocess helper boundary. HTTP uses camelCase (`subHeader`) and the helper JSON uses snake_case (`sub_header`); `server.py` owns that translation.
+- Only include actual clickable PDF URLs. Never fabricate or translate destinations; preservation of extracted URLs is important.
+- Keep browser copy/export behavior and workbook generation consistent when changing layout or formula-safety logic. The `rows` array in `script.js` is the source of truth, and search only filters the preview rather than changing the export dataset.
+- Maintain the preview's constrained scrolling: `.table-wrap` is the scrollable table area, while page scrolling is only a fallback for very short windows.
+- The workbook layout is fixed: one sheet per PDF, with columns for Header, sub header, Detail, Link, Link D, PRC, NLP, common, and Web points.
+- Formula safety matters in Excel: if a value starts with `=`, `+`, `-`, or `@`, Excel treats it as a formula; exported/copy text should prepend a leading space when needed while keeping the preview text unchanged.
+- User-added URLs must validate as `http://` or `https://`; rows with invalid URLs block export until fixed.
+- `README.md` documents the CLI helper commands and user workflows, including `scripts/extract_pdf_links.py` and `scripts/build_xlsx.py`; prefer those exact semantics when patching extractor or export logic.
 
-The helper CLIs the server relies on:
-- `extract_pdf_links.py <pdf> --out <json>` (prints a summary matching `from N pages (M raw links)`, which `server.py` parses with a regex; nav links are skipped unless `--include-nav`).
-- `build_xlsx.py --json <json> --output <xlsx>`
-
-### Test and lint commands
-There is no test runner, linter, or task config. `tests/` only has stale `.pyc` files from `test_build_xlsx`, `test_extract_pdf_links`, and `test_server` (the sources are gone), so there is no single-test command.
-
-If you need a smoke check while changing behavior, run the app locally and validate the end-to-end flow with a real browser-saved PDF using the UI:
-1. Start the server with `python server.py`.
-2. Upload a PDF created via Chrome/Edge `Print -> Save as PDF`.
-3. Confirm the preview shows clickable rows and that the Excel export downloads successfully.
-
-## Architecture
-- `server.py` is the core of the app. It serves static files from the repo root (`SimpleHTTPRequestHandler`, so every file in the repo root is publicly readable locally) and exposes two HTTP endpoints:
-  - `POST /api/convert` takes multipart `files` (PDFs only), writes each to a temp dir, runs the extractor subprocess per file, then runs the workbook builder once over all pages. Returns `rows`, per-file `files` summaries, `errors`, `pages`, `rowCount`, a suggested `filename`, and the base64 `workbook`. A failing PDF is reported in `errors` without failing the others.
-  - `POST /api/export` takes JSON `{files, rows}` (rows keyed `header`, `sheet`, `subHeader`, `detail`, `url`), regroups consecutive rows by `header` + `sheet` into the extractor's JSON shape (`[{header, sheet, rows:[{sub_header, detail, url}]}]`), rebuilds the workbook with the builder, and returns base64.
-  - Multi-PDF: `/api/convert` tags each PDF's pages and rows with a `sheet` (the PDF's file stem, made unique with ` (2)`, ` (3)` …). `build_xlsx.py` writes one worksheet per distinct `sheet` into a single workbook (sheet names sanitized to Excel's rules, 31 chars, unique; rows already in the sheet are skipped only with `--append`, so a fresh export keeps every row and the web `#` number equals the Excel row). The preview in `script.js` shows one tab per `sheet` (`activeSheet`, `renderSheetTabs`) and only lists the selected tab's rows, while export always sends every row.
-  - Adding files: each upload only sends the new PDFs; `processFiles` appends their rows to `rows` and their summaries to `loadedFiles` (`{name, sheet, pages, rows, error}`), renaming a colliding `sheet` client-side (`uniqueSheetName`). A second upload while one is running is refused (`busy`). Clear asks `window.confirm` when rows exist.
-  - Removing one file: each entry in the file list has a `.file-remove` button (disabled while `busy`); `removeFile` asks `window.confirm` when the file owns rows, then drops that file's `sheet` rows and its `loadedFiles` entry. `/api/convert` returns each file's `sheet`, with a client fallback (PDF name without `.pdf`) for an older server.
-  - Copy table: `sheetClipboard` in `script.js` (`excelRowsForSheet`) rebuilds the open sheet's data rows the way `build_xlsx.py` writes them, without the header row (Header once per run of the same header, sub header only on change, `URL` hyperlink in Link, blank trailing columns) and puts it on the clipboard as `text/html` (+ TSV `text/plain` with the real URL). Keep it in sync if the builder's layout rules change. Both the builder (`safe_text`) and the copy code (`excelSafe`) put a space before a Header / sub header / Detail that starts with `=`, `+`, `-` or `@`, because Excel treats those cells as formulas (openpyxl even stores a leading `=` as a formula); keep the two rules identical.
-  - Search: the search box (`filterText`, `matchesFilter`) only filters what `renderPreview` lists — never what is exported — and keeps user-added (`custom`) rows visible. There is no undo; Clear asks for confirmation instead.
-- The extractor/builder JSON uses snake_case (`sub_header`); the HTTP API and browser use camelCase (`subHeader`). `server.py` is where the two are translated.
-- `script.js` owns the client-side workflow: file selection, drag-and-drop handling, preview rendering, inline editing of the `Detail` column, and the final Excel download. Preview rows are tracked by a per-row `id` (`data-row-id`); the first preview column (`#`, `td.row-number`) is a web-only counter that equals the Excel row number within each sheet (header = row 1, so data starts at 2); it is never sent to `/api/export` or written to the workbook, so cell indexes in `script.js` (e.g. `GROUP_COLUMNS`) start after it; Header/sub header text is shown in grey in the preview when it repeats the previous extracted row (display only, the data keeps the values). For a bare `Click`/`คลิก` or image button, the extractor builds Detail from the date / `Week N` label and card text above it (sub header = month heading); icon-only links use the image name from the PDF's tag tree (`/Figure` `/Alt`, i.e. the file name from "Copy image address") plus any text inside the clickable area, falling back to the `#fragment` target. `requestVersion` discards stale responses when Clear resets the page. The upload uses `XMLHttpRequest` so a progress bar can show real upload progress (first 30%); the server reports no progress, so processing creeps toward 95% until the reply arrives.
-- `index.html` provides the single-page UI shell and preview table, laid out full-width as a vertical flex column (upload panel on top, preview below). The page itself never scrolls: `.app` is `100dvh`, `.preview` fills the rest and only `.table-wrap` (`flex: 1; overflow: auto`) scrolls; do not add other scroll areas (file list, panels). Short windows slim the upload area via a `max-height` media query, and `.preview` has a `min-height` so a too-small window falls back to page scroll rather than clipping the table. The explanatory note under the table is a collapsed `<details>`. After a successful read `script.js` folds the upload panel (an expansion panel: `#uploadToggle` header with `aria-expanded`, `#uploadBody` collapsed via `grid-template-rows`, summary text in `#uploadSummary`); Clear, a failed read, or clicking the header reopens it. The Export / Clear buttons, progress bar and notice stay outside the panel so they remain visible when it is folded. The actual UI logic lives in `script.js`.
-- `requirements.txt` contains the runtime dependencies: `openpyxl` and `PyMuPDF`.
-- The PDF extraction and workbook generation steps are delegated to helper scripts that the server calls via subprocesses; they are expected to be available under `scripts/` for the local app to start.
-
-The important design boundary is: frontend uploads + preview, Python server orchestrates extraction + export, the generated Excel workbook is produced from the extracted page/link data rather than from a database or server-side model.
-
-## Key conventions and repository-specific behavior
-- Only rows with a real clickable URL are included. Text in the PDF or a visible `Click` label is not treated as a valid URL.
-- The app expects browser-saved PDFs, not screenshots or PDFs printed as images. URL destinations are embedded in the PDF; a rasterized image or screenshot does not preserve the original link targets.
-- The preview is intentionally editable: the `Detail` cell and the first `Header`/`sub header` cell of each group can be changed before export (grey repeated Header/sub header cells are read-only and follow the first one), but the `Link` value of extracted rows remains the original URL target. Rows can also be inserted above/below (`+↑`/`+↓`), reordered by dragging the ⠿ handle, and deleted (✕). `script.js` keeps the rows in a `rows` array (source of truth, re-rendered after each structural change). User-added rows (`custom: true`) have editable Header/sub header/Detail/URL cells, must have an `http(s)` URL, and are validated client-side before export; extracted rows keep their original URL.
-- Export filenames are sanitized and limited to 31 characters including the `.xlsx` suffix; multi-file exports use a shared base name.
-- The server binds to `127.0.0.1` only and is meant to run locally for private PDF processing.
-- Output workbook has one sheet per uploaded PDF, each with nine columns: Header, sub header, Detail, Link, Link D, PRC, NLP, common, Web points. Only Link (literal text `URL`) is hyperlinked; Detail is plain text, and Link D and the last four columns stay blank. Header is written once per page group and sub header only when it changes (`--fill-down` is opt-in).
-- Keep Thai text exactly as extracted (including original misspellings) and never invent or guess a URL.
-- On `/api/convert`, the first page-1 row with no sub header gets `เมนูหลัก (หน้าแรก)` injected by `server.py`.
-- `.gitignore` excludes `*.pdf` and `*.xlsx`, so sample files are never committed.
-- Font sizes are rem-based and the root size is fluid (`html { font-size: clamp(16px, 0.55vw + 10px, 22px) }` in `styles.css`), so text grows with the screen; keep new sizes in `rem` rather than `px`.
-- Keep changes aligned with the existing pipeline: user-facing rules live in the browser layer, while extraction/export correctness remains in the Python server subprocess path.
-
-## Repository-specific guidance
-- Do not assume this repo has a Node.js or Python package structure beyond the local app server.
-- Prefer small, direct changes that preserve the static + Python split rather than introducing a new framework or build system.
-- If you extend the conversion logic, keep the user-facing requirement in mind: the tool is built around preserving actual browser-saved PDF link destinations and allowing review/editing before export.
-- When making changes around PDF parsing or Excel output, validate against a real PDF rather than only unit-level assumptions, because the correctness depends on preserved link metadata from the source document.
+## Project layout reference
+- `server.py` — serves the app, parses uploads, runs helper scripts, and exposes the local conversion/export endpoints
+- `scripts/extract_pdf_links.py` — extracts links and row context from PDFs using PyMuPDF
+- `scripts/build_xlsx.py` — writes the final workbook, one sheet per PDF
+- `index.html` / `styles.css` / `script.js` — browser interface, preview table, search, tabs, copy, and export
+- `tests/` — automated checks for extraction logic and PDF mapping behavior
+- `docs/images/` — screenshots used by the project documentation
+- `requirements.txt` — Python dependencies (`openpyxl`, `PyMuPDF`)

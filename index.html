@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -8,20 +8,36 @@
       content="Extract linked rows from browser-saved iKM PDFs and export them to Excel."
     />
     <title>iKM PDF to Excel</title>
-    <link rel="stylesheet" href="styles.css" />
+    <script>
+      try {
+        if (localStorage.getItem('ikm-theme') === 'light') {
+          document.documentElement.dataset.theme = 'light';
+        }
+      } catch {}
+    </script>
+    <link rel="stylesheet" href="styles.css?v=link-editor" />
   </head>
   <body>
     <main class="app">
       <header class="app-header">
         <div class="brand-mark" aria-hidden="true">iK</div>
-        <div>
+        <div class="header-copy">
           <p class="eyebrow">Document to workbook</p>
           <h1>Build a workbook from a page.</h1>
           <p class="intro">Drop in browser-saved iKM PDFs. Every clickable link becomes a row in your Excel file.</p>
         </div>
+        <button class="theme-toggle" id="themeToggle" type="button" aria-label="Toggle dark theme" aria-pressed="true" title="Switch to light theme">
+          <svg class="theme-icon theme-icon--sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="4" />
+            <path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42" />
+          </svg>
+          <svg class="theme-icon theme-icon--moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M20.2 15.4A8.5 8.5 0 0 1 8.6 3.8 8.5 8.5 0 1 0 20.2 15.4Z" />
+          </svg>
+        </button>
       </header>
 
-      <section class="workspace" aria-label="PDF to Excel converter">
+      <section class="workspace" aria-label="Source files to Excel converter">
         <div class="work-column expansion-panel" id="uploadPanel">
           <button
             class="panel-header"
@@ -46,24 +62,28 @@
                 aria-describedby="dropHelp"
               >
                 <input id="sourceInput" type="file" accept=".pdf,application/pdf" multiple />
-                <span class="upload-icon" aria-hidden="true">↑</span>
+                <span class="upload-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 16V4" />
+                    <path d="M7.5 8.5 12 4l4.5 4.5" />
+                    <path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" />
+                  </svg>
+                </span>
                 <strong>Drop PDF files here</strong>
-                <span id="dropHelp">or browse to select one or more PDFs</span>
-                <small>Browser-saved PDFs keep their clickable URLs · new files are added to the list</small>
+                <span id="dropHelp">or browse to select one or more source files</span>
+                <small>PDF links are read locally · new files are added to the list</small>
               </div>
 
-              <div class="file-list" id="fileList" aria-live="polite">
-                <p class="empty-files">No files selected</p>
+              <div class="file-list is-empty" id="fileList" aria-live="polite">
+                <span class="empty-files" role="img" aria-label="No files selected" title="No files selected">
+                  <svg viewBox="0 0 24 24" width="56" height="56" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
+                    <path d="M14 3v5h5" />
+                    <path d="M9 13h6M9 17h4" />
+                  </svg>
+                </span>
               </div>
             </div>
-          </div>
-
-          <div class="progress" id="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" hidden>
-            <div class="progress-head">
-              <span id="progressLabel">Uploading…</span>
-              <span id="progressPercent">0%</span>
-            </div>
-            <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
           </div>
 
           <div class="button-row">
@@ -74,7 +94,7 @@
           </div>
 
           <p class="notice" id="notice" role="status">
-            Only rows with a real clickable URL are included. PDF text or a visible “Click” label alone is not a URL.
+            Only rows with an actual clickable link are included. Visible text alone is not a URL.
           </p>
         </div>
 
@@ -84,36 +104,39 @@
               <p class="eyebrow">Output preview</p>
               <h2>Excel columns</h2>
             </div>
-            <span class="status" id="statusBadge">Waiting for PDF</span>
+            <span class="status" id="statusBadge">Waiting for files</span>
           </div>
 
           <div class="summary" aria-live="polite">
             <span><strong id="pageCount">0</strong> pages</span>
             <span><strong id="rowCount">0</strong> link rows</span>
             <div class="preview-tools">
+              <button class="text-button tool-button" id="undoButton" type="button" title="Undo table change (Ctrl+Z / Cmd+Z)" disabled>↶ Undo</button>
+              <button class="text-button tool-button" id="redoButton" type="button" title="Redo table change (Ctrl+Y / Ctrl+Shift+Z / Cmd+Shift+Z)" disabled>↷ Redo</button>
               <input id="rowFilter" type="search" placeholder="Search rows…" aria-label="Search rows in this table" spellcheck="false" />
               <span class="filter-count" id="filterCount" hidden></span>
               <button class="text-button tool-button" id="copyButton" type="button" title="Copy this sheet's rows as they will appear in Excel (no header row, all rows, ignoring the search)" disabled>⧉ Copy table</button>
             </div>
           </div>
 
-          <div class="sheet-tabs" id="sheetTabs" role="tablist" aria-label="PDF files (one Excel sheet each)" hidden></div>
+          <div class="sheet-tabs" id="sheetTabs" role="tablist" aria-label="Source files (one Excel sheet each)" hidden></div>
 
           <div class="table-wrap">
             <table>
               <thead>
                 <tr>
+                  <th aria-label="Reorder rows" title="Drag to reorder rows"></th>
                   <th title="Row number in the Excel sheet (row 1 is the header). Web only, not exported.">#</th>
                   <th>Header</th>
                   <th>sub header</th>
                   <th>Detail</th>
                   <th>Link</th>
-                  <th>Row</th>
+                  <th>Action</th>
                 </tr>
               </thead>
               <tbody id="previewRows">
                 <tr class="placeholder-row">
-                  <td colspan="6">Your linked rows will appear here after the PDFs are read.</td>
+                  <td colspan="7">Your linked rows will appear here after the source files are read.</td>
                 </tr>
               </tbody>
             </table>
@@ -121,14 +144,59 @@
 
           <details class="column-note">
             <summary>How this table works</summary>
+            <p>Each Header / sub header has a top-right icon toggling Locked / Auto (closed lock) and Unlocked (open lock). All rows start in Locked / Auto: repeated values appear as a grey ~; group headings remain editable and changes flow to consecutive matching Auto cells, skipping Unlocked cells. New rows inherit headings from the preceding row in the same tab (or the first row when inserted at the top), so Copy / Excel omit repeated headings. Unlock a cell to enter a different heading for that row only. Switching back keeps your edits and restores automatic grouping.</p>
             <p>
-              The export keeps all 9 sample columns. With several PDFs, pick a tab to view or edit one PDF; export combines all PDFs into one workbook with one sheet each. Grey Header / sub header text repeats the row above (the Excel file shows it once per group). Only the Link column carries the hyperlink: it shows “URL” in Excel, and “เปิดลิงก์ ↗” in the preview. Detail is plain text. You can edit Detail on every row and Header / sub header on the first row of each group (the grey repeated cells follow it and are read-only; the Link of extracted rows stays the original URL), insert rows above or below (+↑ / +↓), reorder rows by dragging ⠿, and delete rows (✕) in the preview before exporting. Rows you add need a full http(s) URL.
+              The export keeps all 9 sample columns. With several source files, pick a tab to view or edit one file; export combines them into one workbook with one sheet each. Only the Link column carries the hyperlink: it shows “URL” in Excel, and “เปิดลิงก์ ↗” in the preview. Detail is plain text and editable on every row. Use the pencil in Link to edit its full URL, then Save; PDF rows offer “Use original URL” to restore their source destination. Cancel discards the draft. Insert rows by clicking the circled + at a row boundary; the green line is a non-clickable position indicator (the button is also accessible with Tab then Enter or Space, and always visible on touch screens). Reorder rows by dragging ⠿, and delete rows (✕) before exporting. New or edited URLs need a full http(s) URL.
             </p>
           </details>
         </aside>
       </section>
     </main>
 
-    <script src="script.js"></script>
+    <dialog class="confirm-dialog" id="confirmDialog" aria-labelledby="confirmTitle" aria-describedby="confirmMessage">
+      <div class="confirm-dialog-content">
+        <span class="confirm-dialog-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="9" />
+            <path d="M12 8v5M12 16h.01" />
+          </svg>
+        </span>
+        <div class="confirm-dialog-copy">
+          <p class="confirm-dialog-eyebrow" id="confirmEyebrow">Confirm action</p>
+          <h2 id="confirmTitle">Remove this file?</h2>
+          <p id="confirmMessage"></p>
+        </div>
+        <div class="confirm-dialog-actions">
+          <button class="text-button confirm-cancel" id="confirmCancel" type="button">Cancel</button>
+          <button class="confirm-danger-button" id="confirmAction" type="button">Remove file</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog class="confirm-dialog export-check-dialog" id="exportCheckDialog" aria-labelledby="exportCheckTitle" aria-describedby="exportCheckSummary">
+      <h2 id="exportCheckTitle">Check rows before export</h2>
+      <p id="exportCheckSummary"></p>
+      <ul id="exportIssues" class="export-issues"></ul>
+      <form method="dialog">
+        <button class="text-button tool-button" autofocus>Back to table</button>
+      </form>
+    </dialog>
+
+    <dialog class="confirm-dialog link-editor" id="linkDialog" aria-labelledby="linkTitle">
+      <form id="linkForm" novalidate>
+        <h2 id="linkTitle">Edit link</h2>
+        <p id="linkContext"></p>
+        <label for="linkUrl">Full URL</label>
+        <input id="linkUrl" type="url" spellcheck="false" autocomplete="off" aria-describedby="linkHelp linkError" />
+        <p id="linkHelp">Enter a full http:// or https:// URL. Changes apply only after Save.</p>
+        <p id="linkError" class="error-text" role="alert"></p>
+        <div class="link-editor-actions">
+          <button class="text-button tool-button" id="restoreLink" type="button">Use original URL</button>
+          <button class="text-button tool-button" id="cancelLink" type="button">Cancel</button>
+          <button class="text-button tool-button" type="submit">Save link</button>
+        </div>
+      </form>
+    </dialog>
+    <script src="script.js?v=insert-auto-headings"></script>
   </body>
 </html>
